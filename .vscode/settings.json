@@ -3,5 +3,15 @@
     "azureFunctions.projectLanguage": "PowerShell",
     "azureFunctions.projectRuntime": "~4",
     "debug.internalConsoleOptions": "neverOpen",
-    "azureAutomation.directory.basePath": "c:\\Users\\zuhai"
+    "azureAutomation.directory.basePath": "c:\\Users\\zuhai",
+    "rest-client.environmentVariables": {
+        "local": {
+            "host": "http://localhost:7071",
+            "functionKey": ""
+        },
+        "production": {
+            "host": "https://my-graph-function.azurewebsites.net",
+            "functionKey": "YOUR_SECRET_HOST_KEY_HERE"
+        }
+    }
 }

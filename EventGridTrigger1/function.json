@@ -4,6 +4,13 @@
       "type": "eventGridTrigger",
       "name": "eventGridEvent",
       "direction": "in"
+    },
+    {
+      "type": "blob",
+      "name": "outputBlob",
+      "path": "event-logs/{sys.randguid}.txt",
+      "connection": "AzureWebJobsStorage",
+      "direction": "out"
     }
   ]
 }

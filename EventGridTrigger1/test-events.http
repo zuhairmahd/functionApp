@@ -1,0 +1,30 @@
+### Variables
+@functionName = EventGridTrigger1
+
+### Test Microsoft Graph Group Update
+POST {{host}}?functionName={{functionName}}
+Content-Type: application/json
+aeg-event-type: Notification
+
+[
+  {
+    "id": "{{$guid}}",
+    "type": "Microsoft.Graph.GroupUpdated",
+    "data": {
+      "displayName": "Test Environment Change"
+    }
+  },
+  {
+    "id": "00d8a100-2e92-4bfa-86e1-0056dacd0fce",
+    "type": "Microsoft.Graph.GroupUpdated",
+    "subject": "Groups/11112222-3333-4444-5555-666677778888",
+    "time": "2025-12-23T22:24:31Z",
+    "data": {
+      "changeType": "updated",
+      "resourceData": {
+        "id": "11112222-3333-4444-5555-666677778888",
+        "displayName": "Engineering Team - Updated"
+      }
+    }
+  }
+]
