@@ -1,5 +1,370 @@
+<#PSScriptInfo
+.VERSION 2.0.0
+.GUID 8f3a2d1c-9e4b-4a7f-b2c3-5d6e8f9a1b2c
+.AUTHOR Zuhair Mahmoud
+.DESCRIPTION Synchronizes device tags between user groups and device groups in Entra ID using Microsoft Graph PowerShell SDK
+.EXTERNALMODULEDEPENDENCIES Microsoft.Graph.Authentication, Microsoft.Graph.Groups, Microsoft.Graph.Users, Microsoft.Graph.Identity.DirectoryManagement
+.SYNOPSIS
+Manages device tags by syncing user group membership with device registration status in Entra ID, accepting CloudEvents v1.0 format input.
+
+.DESCRIPTION
+This script performs bidirectional synchronization of device tags in Entra ID:
+1. Accepts CloudEvents v1.0 format input for directory update events
+2. Retrieves all users from a specified user group
+3. Identifies Entra-joined Windows devices registered to those users
+4. Applies a specified tag to eligible devices
+5. Validates devices in a device group and removes tags from devices whose owners are not in the user group
+
+The script uses Microsoft Graph PowerShell SDK for all Graph API interactions and includes comprehensive logging.
+
+.PARAMETER eventGridEvent
+A JSON string or file path containing a CloudEvents v1.0 format event for directory update.
+
+.PARAMETER TriggerMetadata
+Metadata about the trigger event (automatically provided by Azure Functions).
+
+.PARAMETER WhatIf
+A switch to perform a dry-run of the script without making actual changes.
+When enabled, the script will show what actions would be taken without modifying any devices.
+Default: $false
+
+.EXAMPLE
+.\DeviceDirSync.ps1 -CloudEvent '{"specversion":"1.0","type":"com.microsoft.directory.device.update","source":"/tenants/contoso","id":"123","time":"2025-12-27T07:00:00Z","data":{"userGroupId":"275105b8-ef99-4ca6-bbca-2fec2d0f4699","deviceGroupId":"e6aa9d01-3127-4a3b-9027-046d5acdfe72","tagToApply":"backupMFA"}}'
+Processes a CloudEvent to sync device tags between the specified user and device groups.
+
+.NOTES
+  - Logs are written to: .\logs\DeviceDirSync.log
+  - Supports both standard and CMTrace log formats
+  - Thread-safe logging with mutex protection
+  - Automatic log rotation when size exceeds 10MB
+#>
+[CmdletBinding()]
 param($eventGridEvent, $TriggerMetadata)
 
+#region Required Modules Check
+$requiredModules = @(
+    'Microsoft.Graph.Authentication',
+    'Microsoft.Graph.Groups',
+    'Microsoft.Graph.Users',
+    'Microsoft.Graph.Identity.DirectoryManagement'
+)
+foreach ($module in $requiredModules)
+{
+    if (-not (Get-Module -ListAvailable -Name $module))
+    {
+        Write-Error "Required module '$module' is not installed. Install it with: Install-Module $module"
+        exit 1
+    }
+}
+#endregion
+
+#region Helper Functions
+function Write-Log()
+{
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true, ParameterSetName = 'Normal')]
+        [string]$Message,
+        [Parameter(Mandatory = $true, ParameterSetName = 'Normal')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'StartLogging')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'FinishLogging')]
+        [ValidateScript({
+                $parentDir = Split-Path $_ -Parent
+                if (-not (Test-Path $parentDir))
+                {
+                    try
+                    {
+                        New-Item -Path $parentDir -ItemType Directory -Force | Out-Null
+                    }
+                    catch
+                    {
+                        throw "Failed to create log directory: $_. Exception: $($_.Exception.Message)"
+                    }
+                }
+                return $true
+            })]
+        [string]$LogFile,
+        [Parameter(Mandatory = $true, ParameterSetName = 'Normal')]
+        [string]$Module,
+        [Parameter(Mandatory = $false, ParameterSetName = 'Normal')]
+        [switch]$WriteToConsole,
+        [Parameter(Mandatory = $false, ParameterSetName = 'Normal')]
+        [ValidateSet("Verbose", "Debug", "Information", "Warning", "Error")]
+        [string]$LogLevel = "Information",
+        [Parameter(Mandatory = $false, ParameterSetName = 'Normal')]
+        [Parameter(Mandatory = $false, ParameterSetName = 'StartLogging')]
+        [Parameter(Mandatory = $false, ParameterSetName = 'FinishLogging')]
+        [switch]$CMTraceFormat,
+        [Parameter(Mandatory = $false, ParameterSetName = 'Normal')]
+        [Parameter(Mandatory = $false, ParameterSetName = 'StartLogging')]
+        [Parameter(Mandatory = $false, ParameterSetName = 'FinishLogging')]
+        [int]$MaxLogSizeMB = 10,
+        [Parameter(Mandatory = $false, ParameterSetName = 'Normal')]
+        [switch]$PassThru,
+        [Parameter(Mandatory = $true, ParameterSetName = 'StartLogging')]
+        [switch]$StartLogging,
+        [Parameter(Mandatory = $false, ParameterSetName = 'StartLogging')]
+        [switch]$OverwriteLog,
+        [Parameter(Mandatory = $true, ParameterSetName = 'FinishLogging')]
+        [switch]$FinishLogging,
+        [Parameter(Mandatory = $false, ParameterSetName = 'Normal')]
+        [Parameter(Mandatory = $false, ParameterSetName = 'StartLogging')]
+        [Parameter(Mandatory = $false, ParameterSetName = 'FinishLogging')]
+        [ValidateSet('Error', 'Warning', 'Information', 'Verbose', 'Debug')]
+        [string]$MinimumLogLevel
+    )
+
+    try
+    {
+        # Use global minimum log level if not provided
+        if (-not $MinimumLogLevel -and $Global:MinimumLogLevel)
+        {
+            $MinimumLogLevel = $Global:MinimumLogLevel
+        }
+        elseif (-not $MinimumLogLevel)
+        {
+            $MinimumLogLevel = 'Information'
+        }
+
+        # Define log level hierarchy
+        $logLevelHierarchy = @{
+            'Error'       = 1
+            'Warning'     = 2
+            'Information' = 3
+            'Verbose'     = 4
+            'Debug'       = 5
+        }
+
+        # Handle StartLogging and FinishLogging
+        if ($StartLogging -or $FinishLogging)
+        {
+            $Module = $MyInvocation.MyCommand.Name
+            $LogLevel = "Information"
+
+            if ($StartLogging)
+            {
+                $separatorLine = "=" * 30 + " start of log session " + "=" * 30
+            }
+            else
+            {
+                $separatorLine = "=" * 30 + " end of log session " + "=" * 30
+            }
+
+            $logDir = Split-Path $LogFile -Parent
+            if (-not (Test-Path $logDir))
+            {
+                New-Item -Path $logDir -ItemType Directory -Force | Out-Null
+            }
+
+            if ($OverwriteLog)
+            {
+                Remove-Item -Path $LogFile -Force -ErrorAction SilentlyContinue | Out-Null
+            }
+
+            if ((Test-Path $LogFile) -and (Get-Item $LogFile).Length -gt ($MaxLogSizeMB * 1MB))
+            {
+                $archiveFile = $LogFile -replace '\.log$', "_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+                Move-Item -Path $LogFile -Destination $archiveFile -Force
+            }
+
+            $logEntry = if ($CMTraceFormat)
+            {
+                $cmTime = Get-Date -Format "HH:mm:ss.fff+000"
+                $cmDate = Get-Date -Format "MM-dd-yyyy"
+                $thread = [System.Threading.Thread]::CurrentThread.ManagedThreadId
+                "<![LOG[$separatorLine]LOG]!><time=`"$cmTime`" date=`"$cmDate`" component=`"$Module`" context=`"`" type=`"1`" thread=`"$thread`" file=`"`">"
+            }
+            else
+            {
+                $separatorLine
+            }
+
+            $mutexName = "LogMutex_" + ($LogFile -replace '[\\/:*?"<>|]', '_')
+            $mutex = New-Object System.Threading.Mutex($false, $mutexName)
+            try
+            {
+                $mutex.WaitOne() | Out-Null
+                Add-Content -Path $LogFile -Value $logEntry -Encoding UTF8 -Force
+            }
+            finally
+            {
+                $mutex.ReleaseMutex()
+                $mutex.Dispose()
+            }
+
+            if ($WriteToConsole)
+            {
+                Write-Host $separatorLine
+            }
+            return
+        }
+
+        # Check log level threshold
+        if (-not ($StartLogging -or $FinishLogging))
+        {
+            $currentLogLevelValue = $logLevelHierarchy[$LogLevel]
+            $minimumLogLevelValue = $logLevelHierarchy[$MinimumLogLevel]
+
+            if ($currentLogLevelValue -gt $minimumLogLevelValue)
+            {
+                return
+            }
+        }
+
+        # Ensure log directory exists
+        $logDir = Split-Path $LogFile -Parent
+        if (-not (Test-Path $logDir))
+        {
+            New-Item -Path $logDir -ItemType Directory -Force | Out-Null
+        }
+
+        # Check for log rotation
+        if ((Test-Path $LogFile) -and (Get-Item $LogFile).Length -gt ($MaxLogSizeMB * 1MB))
+        {
+            $archiveFile = $LogFile -replace '\.log$', "_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+            Move-Item -Path $LogFile -Destination $archiveFile -Force
+        }
+
+        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+        $thread = [System.Threading.Thread]::CurrentThread.ManagedThreadId
+
+        $logEntry = if ($CMTraceFormat)
+        {
+            $cmTime = Get-Date -Format "HH:mm:ss.fff+000"
+            $cmDate = Get-Date -Format "MM-dd-yyyy"
+            $severity = switch ($LogLevel)
+            {
+                "Error"
+                {
+                    3
+                }
+                "Warning"
+                {
+                    2
+                }
+                default
+                {
+                    1
+                }
+            }
+            "<![LOG[$Message]LOG]!><time=`"$cmTime`" date=`"$cmDate`" component=`"$Module`" context=`"`" type=`"$severity`" thread=`"$thread`" file=`"`">"
+        }
+        else
+        {
+            "$timestamp [$LogLevel] [$Module] [Thread:$thread] $Message"
+        }
+
+        $mutexName = "LogMutex_" + ($LogFile -replace '[\\/:*?"<>|]', '_')
+        $mutex = New-Object System.Threading.Mutex($false, $mutexName)
+
+        try
+        {
+            $mutex.WaitOne() | Out-Null
+            Add-Content -Path $LogFile -Value $logEntry -Encoding UTF8 -Force
+        }
+        finally
+        {
+            $mutex.ReleaseMutex()
+            $mutex.Dispose()
+        }
+
+        if ($WriteToConsole)
+        {
+            switch ($LogLevel)
+            {
+                "Error"
+                {
+                    Write-Error "[$Module] $Message" -ErrorAction SilentlyContinue
+                }
+                "Warning"
+                {
+                    Write-Warning "[$Module] $Message"
+                }
+                "Verbose"
+                {
+                    Write-Verbose "[$Module] $Message"
+                }
+                "Debug"
+                {
+                    Write-Debug "[$Module] $Message"
+                }
+                default
+                {
+                    Write-Verbose "Logged: $logEntry"
+                }
+            }
+        }
+
+        if ($PassThru)
+        {
+            return [PSCustomObject]@{
+                Timestamp = $timestamp
+                LogLevel  = $LogLevel
+                Module    = $Module
+                Message   = $Message
+                Thread    = $thread
+                LogFile   = $LogFile
+                Entry     = $logEntry
+            }
+        }
+    }
+    catch
+    {
+        Write-Error "Failed to write to log file '$LogFile': $_"
+        Write-Host "$timestamp [$LogLevel] [$Module] $Message" -ForegroundColor $(
+            switch ($LogLevel)
+            {
+                "Error"
+                {
+                    "Red"
+                }
+                "Warning"
+                {
+                    "Yellow"
+                }
+                "Debug"
+                {
+                    "Cyan"
+                }
+                default
+                {
+                    "White"
+                }
+            }
+        )
+    }
+}
+#endregion Helper Functions
+
+#region variables
+$tagToApply = 'mfabackup'
+$scriptName = $MyInvocation.MyCommand.Name
+$logBlobPath = "event-logs/$($scriptName -replace '\.ps1$', '')-$([guid]::NewGuid().ToString('N')).log"
+$localLogFile = Join-Path -Path $env:FUNCTIONS_WORKER_TEMP -ChildPath ($logBlobPath -replace '/', '\')
+$global:logFile = $logBlobPath
+$cloudEventObj = $eventGridEvent | ConvertFrom-Json
+# Extract parameters from CloudEvent
+$groupId = $cloudEventObj.data.resourceData.id
+$userId = $cloudEventObj.data.resourceData.'members@delta'[0].id
+$operation = if ($cloudEventObj.data.resourceData.'members@delta'[0].'@removed' -eq 'deleted')
+{
+    'remove'
+}
+else
+{
+    'add'
+}
+$operationLabel = if ($operation -eq 'add')
+{
+    'add (apply tag)'
+}
+else
+{
+    'remove (clear tag)'
+}
+#endregion variables
+
+Write-Log -LogFile $localLogFile -StartLogging -OverwriteLog
 $events = if ($eventGridEvent -is [System.Array])
 {
     $eventGridEvent
@@ -8,7 +373,6 @@ else
 {
     @($eventGridEvent)
 }
-
 $humanReadable = foreach ($evt in $events)
 {
     $lines = @()
@@ -16,14 +380,14 @@ $humanReadable = foreach ($evt in $events)
     $evtType = $evt.eventType
     if (-not $evtType)
     {
-        $evtType = $evt.type 
+        $evtType = $evt.type
     }
     $lines += "EventType: $evtType"
     $lines += "Subject: $($evt.subject)"
     $evtTime = $evt.eventTime
     if (-not $evtTime)
     {
-        $evtTime = $evt.time 
+        $evtTime = $evt.time
     }
     $lines += "EventTime: $evtTime"
     $lines += "DataVersion: $($evt.dataVersion)"
@@ -32,9 +396,202 @@ $humanReadable = foreach ($evt in $events)
     $lines += ($evt.data | ConvertTo-Json -Depth 8 -Compress)
     $lines -join "`n"
 }
-
-# Persist a human-readable record into the blob output binding
-Push-OutputBinding -Name outputBlob -Value ($humanReadable -join "`n`n")
-
 # Still log to console for quick local verification
 ($humanReadable -join "`n`n") | Write-Host
+
+#region Main Script
+Write-Log -LogFile $localLogFile -StartLogging -OverwriteLog
+Write-Log -LogFile $localLogFile -Module $scriptName -Message "Extracted parameters - groupId: $groupId, user Id: $userId, operation: $operation" -LogLevel Information
+Write-Host "CloudEvent parsed successfully" -ForegroundColor Green
+Write-Host "Group ID: $groupId" -ForegroundColor Cyan
+Write-Host "User ID: $userId" -ForegroundColor Cyan
+Write-Host "Operation: $operationLabel" -ForegroundColor Cyan
+Write-Host " Tag to Apply: $tagToApply" -ForegroundColor Cyan
+
+try
+{
+    # Connect to Microsoft Graph
+    Connect-MgGraph -Identity
+    Write-Host "Successfully connected to Microsoft Graph" -ForegroundColor Green
+
+    # get user devices and information
+    $user = Get-MgUser -UserId $userId -ErrorAction Stop
+    $group = Get-MgGroup -GroupId $groupId -ErrorAction Stop
+    $devices = Get-MgUserRegisteredDevice -UserId $userId -ErrorAction Stop
+    $userDisplayName = $user.DisplayName
+    $userPrincipalName = $user.UserPrincipalName
+    $groupName = $group.DisplayName
+    Write-Host "User $userDisplayName ($userPrincipalName) was $(if ($operation -eq 'add') { 'added to' } else { 'removed from' }) group $groupName" -ForegroundColor Green
+    Write-Host "Getting devices for user $userDisplayName ($userPrincipalName)..." -ForegroundColor Cyan
+    Write-Host "Found $($devices.count) devices registered to user $userDisplayName ($userPrincipalName)" -ForegroundColor Green
+
+    # Apply tags to devices
+    $tagAction = if ($operation -eq 'add')
+    {
+        "Applying tag '$tagToApply'"
+    }
+    else
+    {
+        "Removing tag '$tagToApply'"
+    }
+    Write-Log -LogFile $localLogFile -Module $scriptName -Message "Step 4: $tagAction" -LogLevel Information
+    Write-Host "`n$tagAction for devices..." -ForegroundColor Cyan
+
+    $devicesToTag = @()
+    $devicesToClean = @()
+    foreach ($device in $devices)
+    {
+        $currentTag = if ($device.ExtensionAttribute1)
+        {
+            $device.ExtensionAttribute1
+        }
+        else
+        {
+            $null
+        }
+
+        if ($currentTag -ne $tagToApply -and $operation -eq 'add' -and $device.OperatingSystem -eq 'Windows')
+        {
+            $devicesToTag += $device
+        }
+        elseif ($currentTag -eq $tagToApply -and $operation -eq 'remove' -and $device.OperatingSystem -eq 'Windows')
+        {
+            # For removal, we can also track devices to clean if needed
+            $devicesToClean += $device
+        }
+    }
+
+    $targetDevices = if ($operation -eq 'add')
+    {
+        $devicesToTag
+    }
+    else
+    {
+        $devicesToClean
+    }
+    $targetActionNoun = if ($operation -eq 'add')
+    {
+        'tagging'
+    }
+    else
+    {
+        'tag removal'
+    }
+    Write-Host "Found $($targetDevices.Count) devices that need $targetActionNoun" -ForegroundColor Cyan
+
+    if ($targetDevices.Count -gt 0)
+    {
+        $successCount = 0
+        $failureCount = 0
+        foreach ($device in $targetDevices)
+        {
+            if (-not $WhatIf)
+            {
+                try
+                {
+                    $tagValueToApply = if ($operation -eq 'remove')
+                    {
+                        $null
+                    }
+                    else
+                    {
+                        $tagToApply
+                    }
+                    $params = @{
+                        "extensionAttribute1" = $tagValueToApply
+                    }
+                    Update-MgDevice -DeviceId $device.Id -BodyParameter $params
+                    $successAction = if ($operation -eq 'remove')
+                    {
+                        'Removed tag from'
+                    }
+                    else
+                    {
+                        'Applied tag to'
+                    }
+                    Write-Log -LogFile $localLogFile -Module $scriptName -Message "$successAction device: $($device.DisplayName)" -LogLevel Information
+                    Write-Host " $successAction device: $($device.DisplayName)" -ForegroundColor Green
+                    $successCount++
+                }
+                catch
+                {
+                    $failureAction = if ($operation -eq 'remove')
+                    {
+                        'remove tag from'
+                    }
+                    else
+                    {
+                        'tag device'
+                    }
+                    Write-Log -LogFile $localLogFile -Module $scriptName -Message "Failed to $failureAction $($device.DisplayName): $_" -LogLevel Error
+                    Write-Host " Failed to $failureAction $($device.DisplayName)" -ForegroundColor Red
+                    $failureCount++
+                }
+            }
+            else
+            {
+                $whatIfAction = if ($operation -eq 'remove')
+                {
+                    'remove tag from'
+                }
+                else
+                {
+                    'tag'
+                }
+                Write-Host " [WHATIF] Would $whatIfAction: $($device.DisplayName)" -ForegroundColor Yellow
+            }
+        }
+
+        $operationSummary = if ($operation -eq 'remove')
+        {
+            'Tag removal operation'
+        }
+        else
+        {
+            'Tag application operation'
+        }
+        if ($failureCount -gt 0)
+        {
+            $failureRate = [math]::Round(($failureCount / $targetDevices.Count) * 100, 2)
+            Write-Log -LogFile $localLogFile -Module $scriptName -Message "$operationSummary completed with $failureRate% failure rate ($failureCount / $($targetDevices.Count))" -LogLevel Warning
+            Write-Host "$operationSummary completed with $failureRate% failure rate ($failureCount / $($targetDevices.Count))" -ForegroundColor Yellow
+        }
+        else
+        {
+            Write-Log -LogFile $localLogFile -Module $scriptName -Message "$operationSummary completed successfully for all devices" -LogLevel Information
+            Write-Host "$operationSummary completed successfully for all devices" -ForegroundColor Green
+        }
+    }
+
+    Write-Log -LogFile $localLogFile -Module $scriptName -Message "Script completed successfully - Operation: $operation, Tagged: $($devicesToTag.Count), Cleaned: $($devicesToClean.Count)" -LogLevel Information
+    Write-Host "`nScript completed successfully" -ForegroundColor Green
+    Write-Host " Devices tagged: $($devicesToTag.Count)" -ForegroundColor Cyan
+    Write-Host " Devices cleaned: $($devicesToClean.Count)" -ForegroundColor Cyan
+}
+catch
+{
+    Write-Log -LogFile $localLogFile -Module $scriptName -Message "Script failed with error: $_" -LogLevel Error
+    Write-Log -LogFile $localLogFile -Module $scriptName -Message "Stack trace: $($_.ScriptStackTrace)" -LogLevel Error
+    Write-Host "`nScript failed: $_" -ForegroundColor Red
+}
+finally
+{
+    Write-Log -LogFile $localLogFile -FinishLogging
+
+    $logPayload = @()
+    $logPayload += "LogBlobPath: $logBlobPath"
+    $logPayload += ""
+    $logPayload += "=== Event Snapshot ==="
+    $logPayload += ($humanReadable -join "`n`n")
+    if (Test-Path $localLogFile)
+    {
+        $logPayload += ""
+        $logPayload += "=== Detailed Log ==="
+        $logPayload += Get-Content -Path $localLogFile -Raw
+    }
+
+    Push-OutputBinding -Name outputBlob -Value ($logPayload -join "`n")
+
+    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+}
+#endregion Main Script
