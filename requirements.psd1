@@ -6,8 +6,9 @@
     # 'Az' = '15.*'
 
     # Microsoft Graph PowerShell SDK modules for Entra ID operations
-    'Microsoft.Graph.Authentication'               = '2.*'
-    'Microsoft.Graph.Groups'                       = '2.*'
-    'Microsoft.Graph.Users'                        = '2.*'
-    'Microsoft.Graph.Identity.DirectoryManagement' = '2.*'
+    # DISABLED - Modules are now manually loaded via profile.ps1 to avoid initialization conflicts
+    # 'Microsoft.Graph.Authentication'               = '2.*'
+    # 'Microsoft.Graph.Groups'                       = '2.*'
+    # 'Microsoft.Graph.Users'                        = '2.*'
+    # 'Microsoft.Graph.Identity.DirectoryManagement' = '2.*'
 }

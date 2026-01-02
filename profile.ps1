@@ -14,3 +14,53 @@
 # Azure Functions with managed identity automatically handles authentication.
 
 # You can also define functions or aliases that can be referenced in any of your PowerShell functions.
+# Pre-load the required assembly from bin directory
+try
+{
+    $assemblyPath = Join-Path $PSScriptRoot "bin\Microsoft.Management.Infrastructure.dll"
+    if (Test-Path $assemblyPath)
+    {
+        Add-Type -Path $assemblyPath -ErrorAction SilentlyContinue
+        Write-Host "Loaded Microsoft.Management.Infrastructure from: $assemblyPath"
+    }
+    else
+    {
+        Write-Warning "Microsoft.Management.Infrastructure.dll not found at: $assemblyPath"
+    }
+}
+catch
+{
+    Write-Warning "Could not pre-load Microsoft.Management.Infrastructure: $_"
+}
+
+# Manually import required Microsoft Graph modules
+# This provides control over module loading order and timing
+$modulesPath = Join-Path $PSScriptRoot "modules"
+$requiredModules = @(
+    'Microsoft.Graph.Authentication'
+    'Microsoft.Graph.Users'
+    'Microsoft.Graph.Groups'
+    'Microsoft.Graph.Identity.DirectoryManagement'
+)
+
+foreach ($moduleName in $requiredModules)
+{
+    try
+    {
+        $modulePath = Join-Path $modulesPath $moduleName
+        if (Test-Path $modulePath)
+        {
+            Import-Module $modulePath -Force -ErrorAction Stop
+            Write-Host "Loaded module: $moduleName"
+        }
+        else
+        {
+            Write-Warning "Module not found: $moduleName at $modulePath"
+        }
+    }
+    catch
+    {
+        Write-Warning "Failed to load module $moduleName : $_"
+    }
+}
+

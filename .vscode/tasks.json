@@ -2,9 +2,17 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"type": "func",
+			"type": "shell",
 			"label": "func: host start",
-			"command": "host start",
+			"command": "func start",
+			"options": {
+				"shell": {
+					"executable": "cmd.exe",
+					"args": [
+						"/c"
+					]
+				}
+			},
 			"problemMatcher": "$func-powershell-watch",
 			"isBackground": true
 		}

@@ -1,13 +1,12 @@
 {
   "version": "2.0",
   "logging": {
-    "fileLoggingMode": "debugOnly",
     "console": {
       "isEnabled": true,
-      "level": "Information"
+      "level": "trace"
     },
     "logLevel": {
-      "default": "Information"
+      "default": "Trace"
     },
     "applicationInsights": {
       "samplingSettings": {
@@ -16,15 +15,11 @@
       }
     }
   },
-  "retry": {
-    "delayInterval": "00:00:02",
-    "maxRetryCount": 5
-  },
   "extensionBundle": {
     "id": "Microsoft.Azure.Functions.ExtensionBundle",
     "version": "[4.*, 5.0.0)"
   },
   "managedDependency": {
-    "enabled": true
+    "enabled": false
   }
 }
