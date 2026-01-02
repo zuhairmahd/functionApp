@@ -6,11 +6,11 @@
       "direction": "in"
     },
     {
-      "type": "blob",
-      "name": "outputBlob",
-      "path": "event-logs/{sys.randguid}.txt",
-      "connection": "AzureWebJobsStorage",
-      "direction": "out"
+      "type": "queue",
+      "direction": "out",
+      "name": "log",
+      "queueName": "outqueue",
+      "connection": "AzureWebJobsStorage"
     }
   ]
 }

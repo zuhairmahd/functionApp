@@ -58,290 +58,8 @@ foreach ($module in $requiredModules)
 }
 #endregion
 
-#region Helper Functions
-function Write-Log()
-{
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory = $true, ParameterSetName = 'Normal')]
-        [string]$Message,
-        [Parameter(Mandatory = $true, ParameterSetName = 'Normal')]
-        [Parameter(Mandatory = $true, ParameterSetName = 'StartLogging')]
-        [Parameter(Mandatory = $true, ParameterSetName = 'FinishLogging')]
-        [ValidateScript({
-                $parentDir = Split-Path $_ -Parent
-                if (-not (Test-Path $parentDir))
-                {
-                    try
-                    {
-                        New-Item -Path $parentDir -ItemType Directory -Force | Out-Null
-                    }
-                    catch
-                    {
-                        throw "Failed to create log directory: $_. Exception: $($_.Exception.Message)"
-                    }
-                }
-                return $true
-            })]
-        [string]$LogFile,
-        [Parameter(Mandatory = $true, ParameterSetName = 'Normal')]
-        [string]$Module,
-        [Parameter(Mandatory = $false, ParameterSetName = 'Normal')]
-        [switch]$WriteToConsole,
-        [Parameter(Mandatory = $false, ParameterSetName = 'Normal')]
-        [ValidateSet("Verbose", "Debug", "Information", "Warning", "Error")]
-        [string]$LogLevel = "Information",
-        [Parameter(Mandatory = $false, ParameterSetName = 'Normal')]
-        [Parameter(Mandatory = $false, ParameterSetName = 'StartLogging')]
-        [Parameter(Mandatory = $false, ParameterSetName = 'FinishLogging')]
-        [switch]$CMTraceFormat,
-        [Parameter(Mandatory = $false, ParameterSetName = 'Normal')]
-        [Parameter(Mandatory = $false, ParameterSetName = 'StartLogging')]
-        [Parameter(Mandatory = $false, ParameterSetName = 'FinishLogging')]
-        [int]$MaxLogSizeMB = 10,
-        [Parameter(Mandatory = $false, ParameterSetName = 'Normal')]
-        [switch]$PassThru,
-        [Parameter(Mandatory = $true, ParameterSetName = 'StartLogging')]
-        [switch]$StartLogging,
-        [Parameter(Mandatory = $false, ParameterSetName = 'StartLogging')]
-        [switch]$OverwriteLog,
-        [Parameter(Mandatory = $true, ParameterSetName = 'FinishLogging')]
-        [switch]$FinishLogging,
-        [Parameter(Mandatory = $false, ParameterSetName = 'Normal')]
-        [Parameter(Mandatory = $false, ParameterSetName = 'StartLogging')]
-        [Parameter(Mandatory = $false, ParameterSetName = 'FinishLogging')]
-        [ValidateSet('Error', 'Warning', 'Information', 'Verbose', 'Debug')]
-        [string]$MinimumLogLevel
-    )
-
-    try
-    {
-        # Use global minimum log level if not provided
-        if (-not $MinimumLogLevel -and $Global:MinimumLogLevel)
-        {
-            $MinimumLogLevel = $Global:MinimumLogLevel
-        }
-        elseif (-not $MinimumLogLevel)
-        {
-            $MinimumLogLevel = 'Information'
-        }
-
-        # Define log level hierarchy
-        $logLevelHierarchy = @{
-            'Error'       = 1
-            'Warning'     = 2
-            'Information' = 3
-            'Verbose'     = 4
-            'Debug'       = 5
-        }
-
-        # Handle StartLogging and FinishLogging
-        if ($StartLogging -or $FinishLogging)
-        {
-            $Module = $MyInvocation.MyCommand.Name
-            $LogLevel = "Information"
-
-            if ($StartLogging)
-            {
-                $separatorLine = "=" * 30 + " start of log session " + "=" * 30
-            }
-            else
-            {
-                $separatorLine = "=" * 30 + " end of log session " + "=" * 30
-            }
-
-            $logDir = Split-Path $LogFile -Parent
-            if (-not (Test-Path $logDir))
-            {
-                New-Item -Path $logDir -ItemType Directory -Force | Out-Null
-            }
-
-            if ($OverwriteLog)
-            {
-                Remove-Item -Path $LogFile -Force -ErrorAction SilentlyContinue | Out-Null
-            }
-
-            if ((Test-Path $LogFile) -and (Get-Item $LogFile).Length -gt ($MaxLogSizeMB * 1MB))
-            {
-                $archiveFile = $LogFile -replace '\.log$', "_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
-                Move-Item -Path $LogFile -Destination $archiveFile -Force
-            }
-
-            $logEntry = if ($CMTraceFormat)
-            {
-                $cmTime = Get-Date -Format "HH:mm:ss.fff+000"
-                $cmDate = Get-Date -Format "MM-dd-yyyy"
-                $thread = [System.Threading.Thread]::CurrentThread.ManagedThreadId
-                "<![LOG[$separatorLine]LOG]!><time=`"$cmTime`" date=`"$cmDate`" component=`"$Module`" context=`"`" type=`"1`" thread=`"$thread`" file=`"`">"
-            }
-            else
-            {
-                $separatorLine
-            }
-
-            $mutexName = "LogMutex_" + ($LogFile -replace '[\\/:*?"<>|]', '_')
-            $mutex = New-Object System.Threading.Mutex($false, $mutexName)
-            try
-            {
-                $mutex.WaitOne() | Out-Null
-                Add-Content -Path $LogFile -Value $logEntry -Encoding UTF8 -Force
-            }
-            finally
-            {
-                $mutex.ReleaseMutex()
-                $mutex.Dispose()
-            }
-
-            if ($WriteToConsole)
-            {
-                Write-Host $separatorLine
-            }
-            return
-        }
-
-        # Check log level threshold
-        if (-not ($StartLogging -or $FinishLogging))
-        {
-            $currentLogLevelValue = $logLevelHierarchy[$LogLevel]
-            $minimumLogLevelValue = $logLevelHierarchy[$MinimumLogLevel]
-
-            if ($currentLogLevelValue -gt $minimumLogLevelValue)
-            {
-                return
-            }
-        }
-
-        # Ensure log directory exists
-        $logDir = Split-Path $LogFile -Parent
-        if (-not (Test-Path $logDir))
-        {
-            New-Item -Path $logDir -ItemType Directory -Force | Out-Null
-        }
-
-        # Check for log rotation
-        if ((Test-Path $LogFile) -and (Get-Item $LogFile).Length -gt ($MaxLogSizeMB * 1MB))
-        {
-            $archiveFile = $LogFile -replace '\.log$', "_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
-            Move-Item -Path $LogFile -Destination $archiveFile -Force
-        }
-
-        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
-        $thread = [System.Threading.Thread]::CurrentThread.ManagedThreadId
-
-        $logEntry = if ($CMTraceFormat)
-        {
-            $cmTime = Get-Date -Format "HH:mm:ss.fff+000"
-            $cmDate = Get-Date -Format "MM-dd-yyyy"
-            $severity = switch ($LogLevel)
-            {
-                "Error"
-                {
-                    3
-                }
-                "Warning"
-                {
-                    2
-                }
-                default
-                {
-                    1
-                }
-            }
-            "<![LOG[$Message]LOG]!><time=`"$cmTime`" date=`"$cmDate`" component=`"$Module`" context=`"`" type=`"$severity`" thread=`"$thread`" file=`"`">"
-        }
-        else
-        {
-            "$timestamp [$LogLevel] [$Module] [Thread:$thread] $Message"
-        }
-
-        $mutexName = "LogMutex_" + ($LogFile -replace '[\\/:*?"<>|]', '_')
-        $mutex = New-Object System.Threading.Mutex($false, $mutexName)
-
-        try
-        {
-            $mutex.WaitOne() | Out-Null
-            Add-Content -Path $LogFile -Value $logEntry -Encoding UTF8 -Force
-        }
-        finally
-        {
-            $mutex.ReleaseMutex()
-            $mutex.Dispose()
-        }
-
-        if ($WriteToConsole)
-        {
-            switch ($LogLevel)
-            {
-                "Error"
-                {
-                    Write-Error "[$Module] $Message" -ErrorAction SilentlyContinue
-                }
-                "Warning"
-                {
-                    Write-Warning "[$Module] $Message"
-                }
-                "Verbose"
-                {
-                    Write-Verbose "[$Module] $Message"
-                }
-                "Debug"
-                {
-                    Write-Debug "[$Module] $Message"
-                }
-                default
-                {
-                    Write-Verbose "Logged: $logEntry"
-                }
-            }
-        }
-
-        if ($PassThru)
-        {
-            return [PSCustomObject]@{
-                Timestamp = $timestamp
-                LogLevel  = $LogLevel
-                Module    = $Module
-                Message   = $Message
-                Thread    = $thread
-                LogFile   = $LogFile
-                Entry     = $logEntry
-            }
-        }
-    }
-    catch
-    {
-        Write-Error "Failed to write to log file '$LogFile': $_"
-        Write-Host "$timestamp [$LogLevel] [$Module] $Message" -ForegroundColor $(
-            switch ($LogLevel)
-            {
-                "Error"
-                {
-                    "Red"
-                }
-                "Warning"
-                {
-                    "Yellow"
-                }
-                "Debug"
-                {
-                    "Cyan"
-                }
-                default
-                {
-                    "White"
-                }
-            }
-        )
-    }
-}
-#endregion Helper Functions
-
 #region variables
 $tagToApply = 'mfabackup'
-$scriptName = $MyInvocation.MyCommand.Name
-$logBlobPath = "event-logs/$($scriptName -replace '\.ps1$', '')-$([guid]::NewGuid().ToString('N')).log"
-$localLogFile = Join-Path -Path $env:FUNCTIONS_WORKER_TEMP -ChildPath ($logBlobPath -replace '/', '\')
-$global:logFile = $logBlobPath
 $cloudEventObj = $eventGridEvent | ConvertFrom-Json
 # Extract parameters from CloudEvent
 $groupId = $cloudEventObj.data.resourceData.id
@@ -364,7 +82,6 @@ else
 }
 #endregion variables
 
-Write-Log -LogFile $localLogFile -StartLogging -OverwriteLog
 $events = if ($eventGridEvent -is [System.Array])
 {
     $eventGridEvent
@@ -396,12 +113,11 @@ $humanReadable = foreach ($evt in $events)
     $lines += ($evt.data | ConvertTo-Json -Depth 8 -Compress)
     $lines -join "`n"
 }
+
 # Still log to console for quick local verification
 ($humanReadable -join "`n`n") | Write-Host
 
 #region Main Script
-Write-Log -LogFile $localLogFile -StartLogging -OverwriteLog
-Write-Log -LogFile $localLogFile -Module $scriptName -Message "Extracted parameters - groupId: $groupId, user Id: $userId, operation: $operation" -LogLevel Information
 Write-Host "CloudEvent parsed successfully" -ForegroundColor Green
 Write-Host "Group ID: $groupId" -ForegroundColor Cyan
 Write-Host "User ID: $userId" -ForegroundColor Cyan
@@ -434,7 +150,6 @@ try
     {
         "Removing tag '$tagToApply'"
     }
-    Write-Log -LogFile $localLogFile -Module $scriptName -Message "Step 4: $tagAction" -LogLevel Information
     Write-Host "`n$tagAction for devices..." -ForegroundColor Cyan
 
     $devicesToTag = @()
@@ -509,7 +224,6 @@ try
                     {
                         'Applied tag to'
                     }
-                    Write-Log -LogFile $localLogFile -Module $scriptName -Message "$successAction device: $($device.DisplayName)" -LogLevel Information
                     Write-Host " $successAction device: $($device.DisplayName)" -ForegroundColor Green
                     $successCount++
                 }
@@ -523,8 +237,7 @@ try
                     {
                         'tag device'
                     }
-                    Write-Log -LogFile $localLogFile -Module $scriptName -Message "Failed to $failureAction $($device.DisplayName): $_" -LogLevel Error
-                    Write-Host " Failed to $failureAction $($device.DisplayName)" -ForegroundColor Red
+                    Write-Error " Failed to $failureAction $($device.DisplayName)" -ForegroundColor Red
                     $failureCount++
                 }
             }
@@ -538,7 +251,7 @@ try
                 {
                     'tag'
                 }
-                Write-Host " [WHATIF] Would $whatIfAction: $($device.DisplayName)" -ForegroundColor Yellow
+                Write-Host " [WHATIF] Would $($whatIfAction): $($device.DisplayName)" -ForegroundColor Yellow
             }
         }
 
@@ -553,45 +266,29 @@ try
         if ($failureCount -gt 0)
         {
             $failureRate = [math]::Round(($failureCount / $targetDevices.Count) * 100, 2)
-            Write-Log -LogFile $localLogFile -Module $scriptName -Message "$operationSummary completed with $failureRate% failure rate ($failureCount / $($targetDevices.Count))" -LogLevel Warning
             Write-Host "$operationSummary completed with $failureRate% failure rate ($failureCount / $($targetDevices.Count))" -ForegroundColor Yellow
         }
         else
         {
-            Write-Log -LogFile $localLogFile -Module $scriptName -Message "$operationSummary completed successfully for all devices" -LogLevel Information
             Write-Host "$operationSummary completed successfully for all devices" -ForegroundColor Green
         }
     }
 
-    Write-Log -LogFile $localLogFile -Module $scriptName -Message "Script completed successfully - Operation: $operation, Tagged: $($devicesToTag.Count), Cleaned: $($devicesToClean.Count)" -LogLevel Information
     Write-Host "`nScript completed successfully" -ForegroundColor Green
     Write-Host " Devices tagged: $($devicesToTag.Count)" -ForegroundColor Cyan
     Write-Host " Devices cleaned: $($devicesToClean.Count)" -ForegroundColor Cyan
 }
 catch
 {
-    Write-Log -LogFile $localLogFile -Module $scriptName -Message "Script failed with error: $_" -LogLevel Error
-    Write-Log -LogFile $localLogFile -Module $scriptName -Message "Stack trace: $($_.ScriptStackTrace)" -LogLevel Error
-    Write-Host "`nScript failed: $_" -ForegroundColor Red
+    Write-Error "`nScript failed: $_" -ForegroundColor Red
 }
 finally
 {
-    Write-Log -LogFile $localLogFile -FinishLogging
-
     $logPayload = @()
-    $logPayload += "LogBlobPath: $logBlobPath"
     $logPayload += ""
     $logPayload += "=== Event Snapshot ==="
     $logPayload += ($humanReadable -join "`n`n")
-    if (Test-Path $localLogFile)
-    {
-        $logPayload += ""
-        $logPayload += "=== Detailed Log ==="
-        $logPayload += Get-Content -Path $localLogFile -Raw
-    }
-
-    Push-OutputBinding -Name outputBlob -Value ($logPayload -join "`n")
-
+    Push-OutputBinding -Name log -Value ($logPayload -join "`n")
     Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
 }
 #endregion Main Script
