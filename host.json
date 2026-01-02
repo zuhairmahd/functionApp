@@ -1,11 +1,35 @@
 {
   "version": "2.0",
   "logging": {
+    "fileLoggingMode": "debugOnly",
+    "console": {
+      "isEnabled": true,
+      "level": "Information"
+    },
+    "logLevel": {
+      "default": "Information"
+    },
     "applicationInsights": {
       "samplingSettings": {
         "isEnabled": true,
         "excludedTypes": "Request"
       }
+    }
+  },
+  "concurrency": {
+    "dynamicConcurrencyEnabled": true
+  },
+  "retry": {
+    "delayInterval": "00:00:02",
+    "maxRetryCount": 5
+  },
+  "extensions": {
+    "queues": {
+      "maxPollingInterval": "00:00:02",
+      "batchSize": 8
+    },
+    "blobs": {
+      "maxDegreeOfParallelism": 3
     }
   },
   "extensionBundle": {
