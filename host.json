@@ -16,21 +16,9 @@
       }
     }
   },
-  "concurrency": {
-    "dynamicConcurrencyEnabled": true
-  },
   "retry": {
     "delayInterval": "00:00:02",
     "maxRetryCount": 5
-  },
-  "extensions": {
-    "queues": {
-      "maxPollingInterval": "00:00:02",
-      "batchSize": 8
-    },
-    "blobs": {
-      "maxDegreeOfParallelism": 3
-    }
   },
   "extensionBundle": {
     "id": "Microsoft.Azure.Functions.ExtensionBundle",
