@@ -9,14 +9,8 @@
 # You can define helper functions, run commands, or specify environment variables
 # NOTE: any variables defined that are not environment variables will get reset after the first execution
 
-# Authenticate with Azure PowerShell using MSI.
-# Remove this if you are not planning on using MSI or Azure PowerShell.
-if ($env:MSI_SECRET) {
-    Disable-AzContextAutosave -Scope Process | Out-Null
-    Connect-AzAccount -Identity
-}
-
-# Uncomment the next line to enable legacy AzureRm alias in Azure PowerShell.
-# Enable-AzureRmAlias
+# NOTE: Microsoft Graph PowerShell SDK uses Connect-MgGraph with -Identity
+# which is called in the function code when needed.
+# Azure Functions with managed identity automatically handles authentication.
 
 # You can also define functions or aliases that can be referenced in any of your PowerShell functions.
