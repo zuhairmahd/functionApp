@@ -41,24 +41,14 @@ Processes a CloudEvent to sync device tags between the specified user and device
 [CmdletBinding()]
 param($eventGridEvent, $TriggerMetadata)
 
-#region Required Modules Check
+#region variables
+$modulesFolder = Join-Path -Path $PSScriptRoot -ChildPath 'modules'
 $requiredModules = @(
     'Microsoft.Graph.Authentication',
     'Microsoft.Graph.Groups',
     'Microsoft.Graph.Users',
     'Microsoft.Graph.Identity.DirectoryManagement'
 )
-foreach ($module in $requiredModules)
-{
-    if (-not (Get-Module -ListAvailable -Name $module))
-    {
-        Write-Error "Required module '$module' is not installed. Install it with: Install-Module $module"
-        exit 1
-    }
-}
-#endregion
-
-#region variables
 $tagToApply = 'mfabackup'
 $cloudEventObj = $eventGridEvent | ConvertFrom-Json
 # Extract parameters from CloudEvent
@@ -81,6 +71,34 @@ else
     'remove (clear tag)'
 }
 #endregion variables
+
+#region Required Modules Check
+Write-Host "Importing required modules..." -ForegroundColor Cyan
+foreach ($module in $requiredModules)
+{
+    Write-Verbose "Checking for module: $module"
+    if (Test-Path -Path (Join-Path -Path $modulesFolder -ChildPath $module))
+    {
+        Write-Verbose "Importing module: $module"
+        try
+        {
+            Import-Module -Name (Join-Path -Path $modulesFolder -ChildPath $module) -Force -ErrorAction Stop
+            Write-Host "Module '$module' imported successfully." -ForegroundColor Green
+        }
+        catch
+        {
+            Write-Error "Failed to import module '$module'. Error: $_" -ForegroundColor Red
+            exit 1
+        }
+    }
+    else
+    {
+        Write-Error "Required module '$module' not found in modules folder. Please ensure all required modules are present." -ForegroundColor Red
+        exit 1
+    }
+}
+Write-Host "All required modules imported successfully." -ForegroundColor Green
+#endregion
 
 $events = if ($eventGridEvent -is [System.Array])
 {
@@ -113,7 +131,6 @@ $humanReadable = foreach ($evt in $events)
     $lines += ($evt.data | ConvertTo-Json -Depth 8 -Compress)
     $lines -join "`n"
 }
-
 # Still log to console for quick local verification
 ($humanReadable -join "`n`n") | Write-Host
 
