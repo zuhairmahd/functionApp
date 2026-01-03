@@ -1,10 +1,19 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$UserPrincipalName,
+    [string]$group,
     [switch]$remove
 )
 
-$groupId = "817f24e3-ba30-41fb-a932-cc912fa08c73"
+$groupId = if ($group)
+{
+    $group 
+}
+else
+{
+    "817f24e3-ba30-41fb-a932-cc912fa08c73" 
+}
+
 $success = $false
 # Look up user by UPN and store in variable
 $user = Get-MgUser -UserId $UserPrincipalName

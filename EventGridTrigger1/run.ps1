@@ -41,31 +41,7 @@ Processes a CloudEvent to sync device tags between the specified user and device
 [CmdletBinding()]
 param($eventGridEvent, $TriggerMetadata)
 
-#region variables
-$modulesFolder = Join-Path -Path $PSScriptRoot -child 'modules'
-$tagToApply = 'mfabackup'
-$cloudEventObj = $eventGridEvent | ConvertFrom-Json
-# Extract parameters from CloudEvent
-$groupId = $cloudEventObj.data.resourceData.id
-$userId = $cloudEventObj.data.resourceData.'members@delta'[0].id
-$operation = if ($cloudEventObj.data.resourceData.'members@delta'[0].'@removed' -eq 'deleted')
-{
-    'remove'
-}
-else
-{
-    'add'
-}
-$operationLabel = if ($operation -eq 'add')
-{
-    'add (apply tag)'
-}
-else
-{
-    'remove (clear tag)'
-}
-#endregion variables
-
+#region log received event
 $events = if ($eventGridEvent -is [System.Array])
 {
     $eventGridEvent
@@ -99,53 +75,107 @@ $humanReadable = foreach ($evt in $events)
 }
 # Still log to console for quick local verification
 ($humanReadable -join "`n`n") | Write-Host
+$logPayload = @()
+$logPayload += ""
+$logPayload += "=== Event Snapshot ==="
+$logPayload += ($humanReadable -join "`n`n")
+Push-OutputBinding -Name log -Value ($logPayload -join "`n")
 
-#region Validation
-# Validate that managed dependencies are loaded
-Write-Host "Validating required modules are available..." -ForegroundColor Cyan
+Write-Verbose "Received event: $($eventGridEvent |Out-String)"
+Write-Verbose "Trigger metadata: $($TriggerMetadata | Out-String)"
+Write-Host "received event: $($eventGridEvent | Out-String)" -ForegroundColor Cyan
+Write-Host "Trigger metadata: $($TriggerMetadata | Out-String)" -ForegroundColor Cyan
+#endregion log received event
+
+#region variables
+$tagToApply = 'mfabackup'
+$cloudEventObj = if ($eventGridEvent -is [string])
+{
+    try
+    {
+        $eventGridEvent | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch
+    {
+        Write-Error "Failed to parse eventGridEvent as JSON: $_"
+        throw
+    }
+}
+else
+{
+    $eventGridEvent
+}
+if ($cloudEventObj)
+{
+    # Extract parameters from CloudEvent
+    $groupId = $cloudEventObj.data.resourceData.id
+    $userId = if ($null -ne $cloudEventObj.data.resourceData.'members@delta')
+    {
+        $cloudEventObj.data.resourceData.'members@delta'[0].id
+    }
+    else
+    {
+        $null
+    }
+    $operation = if ($null -ne $cloudEventObj.data.resourceData.'members@delta' -and $cloudEventObj.data.resourceData.'members@delta'[0].'@removed' -eq 'deleted')
+    {
+        'remove'
+    }
+    else
+    {
+        'add'
+    }
+    $operationLabel = if ($operation -eq 'add')
+    {
+        'add (apply tag)'
+    }
+    else
+    {
+        'remove (clear tag)'
+    }
+}
+else
+{
+    Write-Error "CloudEvent object is null or invalid."
+    throw "CloudEvent object is null or invalid."
+}
+#endregion variables
+Write-Host "Variables are as follows:"
+Write-Host " GroupId: $groupId"
+Write-Host " UserId: $userId"
+Write-Host " Operation: $operation ($operationLabel)"
+Write-Host "Operation label: $operationLabel"
+
+
+# Note: Modules should have been pre-loaded by profile.ps1 during cold start
+Write-Host "Validating required modules are loaded..." -ForegroundColor Cyan
 $requiredModules = @(
     'Microsoft.Graph.Authentication',
     'Microsoft.Graph.Groups',
     'Microsoft.Graph.Users',
     'Microsoft.Graph.Identity.DirectoryManagement'
 )
-
+$allModulesLoaded = $true
 foreach ($module in $requiredModules)
 {
-    if (-not (Get-Module -Name $module -ListAvailable))
+    if (Get-Module -Name $module -ErrorAction SilentlyContinue                  )
     {
-        Write-Warning " Module '$module' is not available. Attempting to import from modules folder..." -ForegroundColor Yellow
-        if (Test-Path -Path $modulesFolder)
-        {
-            $modulePath = Join-Path -Path $modulesFolder -ChildPath $module
-            if (Test-Path -Path $modulePath)
-            {
-                Write-Verbose " Importing module '$module' from '$modulePath'..."
-                try
-                {
-                    Import-Module -Name $modulePath -Force
-                    Write-Host " Successfully imported module '$module'." -ForegroundColor Green
-                }
-                catch
-                {
-                    Write-Error " Failed to import module '$module' from '$modulePath': $_" -ForegroundColor Red
-                    throw "Module '$module' import failed."
-                }
-            }
-            else
-            {
-                Write-Error " Required module '$module' not found in modules folder '$moduesFolder'." -ForegroundColor Red
-                throw "Module '$module' is missing."
-            }
-        }
-        else
-        {
-            Write-Error " Modules folder '$moduesFolder' does not exist." -ForegroundColor Red
-            throw "Modules folder is missing."
-        }
+        Write-Host " Module '$module' is already loaded." -ForegroundColor Green
     }
-    Write-Host "All required modules are available." -ForegroundColor Green
+    else
+    {
+        Write-Warning " Module '$module' is not loaded. This should have been loaded by profile.ps1" -ForegroundColor Yellow
+        $allModulesLoaded = $false
+    }
 }
+
+if (-not $allModulesLoaded)
+{
+    Write-Error "One or more required modules failed to load. Check profile.ps1 initialization." -ForegroundColor Red
+    throw "Required modules are not available. Deployment or cold start initialization failed."
+}
+
+Write-Host "All required modules are available." -ForegroundColor Green
 #endregion
 #region Main Script
 Write-Host "CloudEvent parsed successfully" -ForegroundColor Green
@@ -322,3 +352,4 @@ finally
     Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
 }
 #endregion Main Script
+
