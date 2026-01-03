@@ -10,3 +10,4 @@ locations.json
 get-userid.ps1
 create-api-subscription-topic.ps1
 events.json
+getLogs.ps1
