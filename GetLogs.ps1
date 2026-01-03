@@ -2,45 +2,47 @@ $subscriptionId = "8a89e116-824d-4eeb-8ef4-16dcc1f0959b"
 # Get all Application Insights resources from the tenant
 Write-Host "Retrieving Application Insights resources..." -ForegroundColor Cyan
 $appInsightsResources = Get-AzApplicationInsights -SubscriptionId $subscriptionId
-
 # Check if any resources were found
 if ($appInsightsResources.Count -eq 0)
 {
     Write-Host "No Application Insights resources found in the current subscription." -ForegroundColor Red
     exit
 }
-
-# Display the list of Application Insights resources
-Write-Host "`nAvailable Application Insights Resources:" -ForegroundColor Green
-for ($i = 0; $i -lt $appInsightsResources.Count; $i++)
+elseif ($appInsightsResources.Count -eq 1)
 {
-    Write-Host "[$($i+1)]. Name: $($appInsightsResources[$i].Name) | Resource Group: $($appInsightsResources[$i].ResourceGroupName) | Location: $($appInsightsResources[$i].Location)"
+    $selectedResource = $appInsightsResources[0]
+    $appId = $selectedResource.AppId
 }
-Write-Host "[0]. Exit" -ForegroundColor Yellow
-
-# Prompt user to select an Application Insights resource
-Write-Host "`nEnter the number of the Application Insights resource you want to query (or 0 to exit):" -ForegroundColor Yellow
-$selection = Read-Host
-
-# Validate the selection
-while ($selection -notmatch '^\d+$' -or [int]$selection -lt 0 -or [int]$selection -gt $appInsightsResources.Count)
+else
 {
-    Write-Host "Invalid selection. Please select a valid number." -ForegroundColor Red
-    [console]::beep(1000, 300)
+    Write-Host "Found $($appInsightsResources.Count) Application Insights resources." -ForegroundColor Green
+    # Display the list of Application Insights resources
+    for ($i = 0; $i -lt $appInsightsResources.Count; $i++)
+    {
+        Write-Host "[$($i+1)]. Name: $($appInsightsResources[$i].Name) | Resource Group: $($appInsightsResources[$i].ResourceGroupName) | Location: $($appInsightsResources[$i].Location)"
+    }
+    Write-Host "[0]. Exit" -ForegroundColor Yellow
+    # Prompt user to select an Application Insights resource
+    Write-Host "`nEnter the number of the Application Insights resource you want to query (or 0 to exit):" -ForegroundColor Yellow
     $selection = Read-Host
+    # Validate the selection
+    while ($selection -notmatch '^\d+$' -or [int]$selection -lt 0 -or [int]$selection -gt $appInsightsResources.Count)
+    {
+        Write-Host "Invalid selection. Please select a valid number." -ForegroundColor Red
+        [console]::beep(1000, 300)
+        $selection = Read-Host
+    }
+
+    # Check if user wants to exit
+    if ([int]$selection -eq 0)
+    {
+        Write-Host "Exiting script." -ForegroundColor Yellow
+        exit
+    }
+    # Get the selected Application Insights resource
+    $selectedResource = $appInsightsResources[[int]$selection - 1]
+    $appId = $selectedResource.AppId
 }
-
-# Check if user wants to exit
-if ([int]$selection -eq 0)
-{
-    Write-Host "Exiting script." -ForegroundColor Yellow
-    exit
-}
-
-# Get the selected Application Insights resource
-$selectedResource = $appInsightsResources[[int]$selection - 1]
-$appId = $selectedResource.AppId
-
 Write-Host "`nSelected Application Insights: $($selectedResource.Name)" -ForegroundColor Green
 Write-Host "App ID: $appId" -ForegroundColor Cyan
 
@@ -100,6 +102,7 @@ try
     Write-Host "`nQuery Results:" -ForegroundColor Green
     if ($queryResponse.tables -and $queryResponse.tables.Count -gt 0)
     {
+        Write-Host "Number of tables returned: $($queryResponse.tables.Count)" -ForegroundColor Green
         $queryResponse.tables | ForEach-Object {
             Write-Host "Table: $($_.name)" -ForegroundColor Yellow
             Write-Host "Columns: $($_.columns.name -join ', ')" -ForegroundColor Cyan
