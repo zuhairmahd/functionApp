@@ -100,8 +100,9 @@ try
         Write-Host "Number of tables returned: $($queryResponse.tables.Count)" -ForegroundColor Green
         $queryResponse.tables | ForEach-Object {
             Write-Host "Table: $($_.name)" -ForegroundColor Yellow
-            Write-Host "Columns: $($_.columns.name -join ', ')" -ForegroundColor Cyan
+            Write-Host "Column count: $($_.columns.Count)" -ForegroundColor Cyan
             Write-Host "Row Count: $($_.rows.Count)" -ForegroundColor Cyan
+            Write-Host "Columns: $($_.columns.name -join ', ')" -ForegroundColor Cyan
 
             # Display the rows in a formatted way
             if ($_.rows.Count -gt 0)
