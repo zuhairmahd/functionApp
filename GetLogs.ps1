@@ -47,9 +47,7 @@ Write-Host "`nSelected Application Insights: $($selectedResource.Name)" -Foregro
 Write-Host "App ID: $appId" -ForegroundColor Cyan
 
 # Set the access token for the Application Insights resource
-Write-Host "`nRetrieving access token..." -ForegroundColor Cyan
 $tokenObject = Get-AzAccessToken -ResourceUrl "https://api.applicationinsights.io"
-
 # Extract the token as a plain string
 if ($tokenObject -and $tokenObject.Token)
 {
@@ -64,9 +62,6 @@ if ($tokenObject -and $tokenObject.Token)
     {
         $accessToken = $tokenObject.Token
     }
-
-    # Debug: Show token length (not the actual token for security)
-    Write-Host "Access token retrieved successfully (Length: $($accessToken.Length))" -ForegroundColor Green
 }
 else
 {
