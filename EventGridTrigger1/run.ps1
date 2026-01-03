@@ -147,32 +147,35 @@ Write-Host " Operation: $operation ($operationLabel)"
 Write-Host "Operation label: $operationLabel"
 
 
-# Note: Modules should have been pre-loaded by profile.ps1 during cold start
-Write-Host "Validating required modules are loaded..." -ForegroundColor Cyan
+# Note: Modules in the Modules/ folder are automatically added to PSModulePath by Azure Functions
+# They will auto-load when first referenced (no manual import needed)
+Write-Host "Validating required modules are available..." -ForegroundColor Cyan
 $requiredModules = @(
     'Microsoft.Graph.Authentication',
     'Microsoft.Graph.Groups',
     'Microsoft.Graph.Users',
     'Microsoft.Graph.Identity.DirectoryManagement'
 )
-$allModulesLoaded = $true
+$allModulesAvailable = $true
 foreach ($module in $requiredModules)
 {
-    if (Get-Module -Name $module -ErrorAction SilentlyContinue                  )
+    # Check if module is available (either loaded or can be auto-loaded)
+    if (Get-Module -Name $module -ListAvailable -ErrorAction SilentlyContinue)
     {
-        Write-Host " Module '$module' is already loaded." -ForegroundColor Green
+        Write-Host " Module '$module' is available." -ForegroundColor Green
     }
     else
     {
-        Write-Warning " Module '$module' is not loaded. This should have been loaded by profile.ps1" -ForegroundColor Yellow
-        $allModulesLoaded = $false
+        Write-Error " Module '$module' is not available in PSModulePath" -ForegroundColor Red
+        $allModulesAvailable = $false
     }
 }
 
-if (-not $allModulesLoaded)
+if (-not $allModulesAvailable)
 {
-    Write-Error "One or more required modules failed to load. Check profile.ps1 initialization." -ForegroundColor Red
-    throw "Required modules are not available. Deployment or cold start initialization failed."
+    Write-Error "One or more required modules are not available. Check deployment package." -ForegroundColor Red
+    Write-Host "PSModulePath = $env:PSModulePath" -ForegroundColor Yellow
+    throw "Required modules are not available. Deployment issue detected."
 }
 
 Write-Host "All required modules are available." -ForegroundColor Green

@@ -9,42 +9,26 @@
 # You can define helper functions, run commands, or specify environment variables
 # NOTE: any variables defined that are not environment variables will get reset after the first execution
 
-# Pre-load required Microsoft Graph modules during cold start
-# This ensures modules are available for all function invocations
-# CRITICAL: Flex Consumption plan requires modules in app content (not managed dependencies)
+# IMPORTANT: For Flex Consumption plan, the Azure Functions PowerShell worker automatically
+# adds the Modules/ folder to $env:PSModulePath. This enables module autoloading.
+# You do NOT need to manually import modules here - they will be auto-loaded when referenced.
 
-$modulesPath = Join-Path $PSScriptRoot "modules"
-if (-not (Test-Path $modulesPath))
+Write-Host "Profile.ps1: Cold start initialization..." -ForegroundColor Cyan
+Write-Host "Profile.ps1: PSModulePath = $env:PSModulePath" -ForegroundColor Cyan
+
+# Verify that the Modules folder is in PSModulePath
+$modulesInPath = $env:PSModulePath -split ';' | Where-Object { $_ -like '*Modules*' }
+if ($modulesInPath)
 {
-    Write-Error "Modules folder not found at: $modulesPath"
-}
-$requiredModules = @(
-    'Microsoft.Graph.Authentication',
-    'Microsoft.Graph.Users',
-    'Microsoft.Graph.Groups',
-    'Microsoft.Graph.Identity.DirectoryManagement'
-)
-Write-Host "Profile.ps1: Starting module pre-load during cold start..." -ForegroundColor Cyan
-foreach ($moduleName in $requiredModules)
-{
-    try
+    Write-Host "Profile.ps1: Modules folder found in PSModulePath" -ForegroundColor Green
+    foreach ($path in $modulesInPath)
     {
-        $modulePath = Join-Path $modulesPath $moduleName
-        if (Test-Path $modulePath)
-        {
-            Write-Host "Profile.ps1: Importing $moduleName from $modulePath..." -ForegroundColor Cyan
-            Import-Module -Name $modulePath -Force -ErrorAction Stop
-            Write-Host "Profile.ps1: Successfully loaded module: $moduleName" -ForegroundColor Green
-        }
-        else
-        {
-            Write-Error "Profile.ps1: Module path not found: $modulePath"
-        }
-    }
-    catch
-    {
-        Write-Error "Profile.ps1: Failed to import $moduleName : $_"
+        Write-Host "  - $path" -ForegroundColor Cyan
     }
 }
+else
+{
+    Write-Warning "Profile.ps1: No Modules folder found in PSModulePath. This may indicate a deployment issue."
+}
 
-Write-Host "Profile.ps1: Module pre-load complete." -ForegroundColor Green
+Write-Host "Profile.ps1: Cold start initialization complete." -ForegroundColor Green
