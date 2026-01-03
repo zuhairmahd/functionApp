@@ -80,7 +80,6 @@ $logPayload += ""
 $logPayload += "=== Event Snapshot ==="
 $logPayload += ($humanReadable -join "`n`n")
 Push-OutputBinding -Name log -Value ($logPayload -join "`n")
-
 Write-Verbose "Received event: $($eventGridEvent |Out-String)"
 Write-Verbose "Trigger metadata: $($TriggerMetadata | Out-String)"
 Write-Host "received event: $($eventGridEvent | Out-String)" -ForegroundColor Cyan
@@ -140,13 +139,13 @@ else
     throw "CloudEvent object is null or invalid."
 }
 #endregion variables
+
+#region more logging
 Write-Host "Variables are as follows:"
 Write-Host " GroupId: $groupId"
 Write-Host " UserId: $userId"
 Write-Host " Operation: $operation ($operationLabel)"
 Write-Host "Operation label: $operationLabel"
-
-
 # Note: Modules in the Modules/ folder are automatically added to PSModulePath by Azure Functions
 # They will auto-load when first referenced (no manual import needed)
 Write-Host "Validating required modules are available..." -ForegroundColor Cyan
@@ -177,9 +176,9 @@ if (-not $allModulesAvailable)
     Write-Host "PSModulePath = $env:PSModulePath" -ForegroundColor Yellow
     throw "Required modules are not available. Deployment issue detected."
 }
-
 Write-Host "All required modules are available." -ForegroundColor Green
-#endregion
+#endregion more logging
+
 #region Main Script
 Write-Host "CloudEvent parsed successfully" -ForegroundColor Green
 Write-Host "Group ID: $groupId" -ForegroundColor Cyan
