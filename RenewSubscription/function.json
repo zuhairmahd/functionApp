@@ -1,10 +1,17 @@
 {
-    "bindings": [
-        {
-            "name": "Timer",
-            "type": "timerTrigger",
-            "direction": "in",
-            "schedule": "0 0 */12 * * *"
-        }
-    ]
+  "bindings": [
+    {
+      "name": "Timer",
+      "type": "timerTrigger",
+      "direction": "in",
+      "schedule": "0 0 */12 * * *"
+    },
+    {
+      "type": "queue",
+      "direction": "out",
+      "name": "log",
+      "queueName": "outqueue",
+      "connection": "AzureWebJobsStorage"
+    }
+  ]
 }

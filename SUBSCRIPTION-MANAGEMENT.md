@@ -12,7 +12,7 @@ This directory contains scripts and functions to manage Microsoft Graph change n
 - **grant-graph-permissions.ps1** - Grants Microsoft Graph permissions to the user-assigned managed identity
 - **Get-FunctionLogs.ps1** - Retrieves function execution logs from Application Insights
 - **Stream-FunctionLogs.ps1** - Streams live logs from the Function App
-
+These scripts are located in the Tools folder.
 ### Azure Function (Auto-renewal)
 
 - **RenewSubscription/** - Timer-triggered function that automatically renews subscriptions every 12 hours
@@ -32,7 +32,7 @@ Connect-MgGraph -Scopes "Subscription.Read.All", "Group.Read.All"
 Run the creation script:
 
 ```powershell
-.\create-api-subscription-topic.ps1
+.\tools\create-api-subscription-topic.ps1
 ```
 
 This will:
@@ -47,7 +47,7 @@ The Function App uses a **user-assigned managed identity** named `groupchangefun
 Run the permission grant script:
 
 ```powershell
-.\grant-graph-permissions.ps1
+.\tools\grant-graph-permissions.ps1
 ```
 
 This script will:
