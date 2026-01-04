@@ -138,6 +138,7 @@ else
     Write-Error "CloudEvent object is null or invalid."
     throw "CloudEvent object is null or invalid."
 }
+$managedIdentityClientId = "0ed597a6-5cca-4c6f-b51e-10510010e936"
 #endregion variables
 
 #region more logging
@@ -188,7 +189,7 @@ Write-Host " Tag to Apply: $tagToApply" -ForegroundColor Cyan
 try
 {
     # Connect to Microsoft Graph
-    Connect-MgGraph -Identity
+    Connect-MgGraph -Identity -ClientId $managedIdentityClientId -ErrorAction Stop
     Write-Host "Successfully connected to Microsoft Graph" -ForegroundColor Green
 
     # get user devices and information
@@ -350,7 +351,7 @@ finally
     $logPayload += "=== Event Snapshot ==="
     $logPayload += ($humanReadable -join "`n`n")
     Push-OutputBinding -Name log -Value ($logPayload -join "`n")
-    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    Dis -ErrorAction SilentlyContinue | Out-Null
 }
 #endregion Main Script
 

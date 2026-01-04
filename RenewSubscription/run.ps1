@@ -59,6 +59,8 @@ Write-Verbose "Received event: $($Timer      |Out-String)"
 Write-Host "received event: $($Timer | Out-String)" -ForegroundColor Cyan
 #endregion log received event
 
+$managedIdentityClientId = "0ed597a6-5cca-4c6f-b51e-10510010e936"
+
 # Import required modules
 Import-Module Microsoft.Graph.Authentication
 Import-Module Microsoft.Graph.ChangeNotifications
@@ -90,7 +92,7 @@ if (-not $graphSubscriptionId)
     try
     {
         $diagnosticLog += "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Connecting to Microsoft Graph using Managed Identity"
-        Connect-MgGraph -Identity -NoWelcome
+        Connect-MgGraph -Identity -ClientId $managedIdentityClientId -NoWelcome
         $diagnosticLog += "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Successfully connected to Microsoft Graph"
 
         $diagnosticLog += "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Querying all subscriptions"
@@ -198,7 +200,7 @@ else
         # The Function App uses: groupchangefunction-identities-9bef22
         # Client ID: 0ed597a6-5cca-4c6f-b51e-10510010e936
         $diagnosticLog += "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Connecting to Microsoft Graph using Managed Identity"
-        Connect-MgGraph -Identity -NoWelcome
+        Connect-MgGraph -Identity -ClientId $managedIdentityClientId -NoWelcome
         $diagnosticLog += "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Successfully connected to Microsoft Graph"
 
         # Get current subscription
