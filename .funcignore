@@ -4,10 +4,5 @@ __azurite_db*__.json
 __blobstorage__
 __queuestorage__
 local.settings.json
-test
-resourceManager.ps1
-locations.json
-get-userid.ps1
-create-api-subscription-topic.ps1
-events.json
-getLogs.ps1
+tests/
+tools/
