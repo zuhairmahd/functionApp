@@ -1,0 +1,21 @@
+﻿Generated Query:
+union requests, traces, exceptions
+| where timestamp > ago(60m)
+| extend message = iff(itemType == 'exception', outerMessage, iff(itemType == 'request', name, message))
+| extend success = iff(itemType == 'request', success, iff(itemType == 'exception', false, true))
+| extend resultCode = iff(itemType == 'request', resultCode, '')
+| extend duration = iff(itemType == 'request', duration, 0.0)
+| order by timestamp desc
+| take 100
+| project timestamp, itemType, operation_Name, message, duration, success, resultCode, severityLevel, operation_Id
+
+
+JSON Body:
+{
+    "query":  "union requests, traces, exceptions\r\n| where timestamp \u003e ago(60m)\r\n| extend message = iff(itemType == 
+\u0027exception\u0027, outerMessage, iff(itemType == \u0027request\u0027, name, message))\r\n| extend success = iff(itemType 
+== \u0027request\u0027, success, iff(itemType == \u0027exception\u0027, false, true))\r\n| extend resultCode = iff(itemType == 
+\u0027request\u0027, resultCode, \u0027\u0027)\r\n| extend duration = iff(itemType == \u0027request\u0027, duration, 0.0)\r\n| 
+order by timestamp desc\r\n| take 100\r\n| project timestamp, itemType, operation_Name, message, duration, success, 
+resultCode, severityLevel, operation_Id"
+}

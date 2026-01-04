@@ -165,14 +165,14 @@ foreach ($module in $requiredModules)
     }
     else
     {
-        Write-Error " Module '$module' is not available in PSModulePath" -ForegroundColor Red
+        Write-Error " Module '$module' is not available in PSModulePath"
         $allModulesAvailable = $false
     }
 }
 
 if (-not $allModulesAvailable)
 {
-    Write-Error "One or more required modules are not available. Check deployment package." -ForegroundColor Red
+    Write-Error "One or more required modules are not available. Check deployment package."
     Write-Host "PSModulePath = $env:PSModulePath" -ForegroundColor Yellow
     throw "Required modules are not available. Deployment issue detected."
 }
@@ -299,7 +299,7 @@ try
                     {
                         'tag device'
                     }
-                    Write-Error " Failed to $failureAction $($device.DisplayName)" -ForegroundColor Red
+                    Write-Error " Failed to $failureAction $($device.DisplayName)"
                     $failureCount++
                 }
             }
@@ -342,7 +342,7 @@ try
 }
 catch
 {
-    Write-Error "`nScript failed: $_" -ForegroundColor Red
+    Write-Error "`nScript failed: $_"
 }
 finally
 {

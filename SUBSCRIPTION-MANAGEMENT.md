@@ -10,6 +10,8 @@ This directory contains scripts and functions to manage Microsoft Graph change n
 - **renew-subscription.ps1** - Manually renews an existing subscription
 - **check-subscription.ps1** - Checks the status of active subscriptions
 - **grant-graph-permissions.ps1** - Grants Microsoft Graph permissions to the user-assigned managed identity
+- **Get-FunctionLogs.ps1** - Retrieves function execution logs from Application Insights
+- **Stream-FunctionLogs.ps1** - Streams live logs from the Function App
 
 ### Azure Function (Auto-renewal)
 
