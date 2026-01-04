@@ -175,6 +175,7 @@ if (-not $allModulesAvailable)
 {
     Write-Error "One or more required modules are not available. Check deployment package."
     Write-Host "PSModulePath = $env:PSModulePath" -ForegroundColor Yellow
+    throw "Missing required modules."
 }
 Write-Host "All required modules are available." -ForegroundColor Green
 #endregion more logging
@@ -195,13 +196,53 @@ try
     # get user devices and information
     $user = Get-MgUser -UserId $userId -ErrorAction Stop
     $group = Get-MgGroup -GroupId $groupId -ErrorAction Stop
-    $devices = Get-MgUserRegisteredDevice -UserId $userId -ErrorAction Stop
+    $registeredDevices = Get-MgUserRegisteredDevice -UserId $userId -ErrorAction Stop
     $userDisplayName = $user.DisplayName
     $userPrincipalName = $user.UserPrincipalName
     $groupName = $group.DisplayName
     Write-Host "User $userDisplayName ($userPrincipalName) was $(if ($operation -eq 'add') { 'added to' } else { 'removed from' }) group $groupName" -ForegroundColor Green
     Write-Host "Getting devices for user $userDisplayName ($userPrincipalName)..." -ForegroundColor Cyan
-    Write-Host "Found $($devices.count) devices registered to user $userDisplayName ($userPrincipalName)" -ForegroundColor Green
+    Write-Host "Found a total of $($registeredDevices.count) devices registered to user $userDisplayName ($userPrincipalName)" -ForegroundColor Green
+
+    # Get full device objects with extension attributes (Windows devices only), since they are supposedly not returned in registered devices
+    $devices = @()
+    foreach ($regDevice in $registeredDevices)
+    {
+        # Check if this is a Windows device before fetching full details
+        $osType = if ($regDevice.OperatingSystem)
+        {
+            $regDevice.OperatingSystem
+        }
+        else
+        {
+            $regDevice.AdditionalProperties.operatingSystem
+        }
+        # Skip non-Windows devices to reduce API calls
+        if ($osType -ne 'Windows')
+        {
+            Write-Host "  Skipping non-Windows device: $($regDevice.AdditionalProperties.displayName) (OS: $osType)" -ForegroundColor DarkGray
+            continue
+        }
+        $deviceId = if ($regDevice.Id)
+        {
+            $regDevice.Id
+        }
+        else
+        {
+            $regDevice.AdditionalProperties.id
+        }
+        try
+        {
+            $fullDevice = Get-MgDevice -DeviceId $deviceId -ErrorAction Stop
+            Write-Host "  Retrieved Windows device: $($fullDevice.DisplayName) (ID: $($fullDevice.Id))" -ForegroundColor DarkGray
+            $devices += $fullDevice
+        }
+        catch
+        {
+            Write-Warning "Could not retrieve device $deviceId : $_"
+        }
+    }
+    Write-Host "Found $($devices.count) Windows devices registered to user $userDisplayName ($userPrincipalName)" -ForegroundColor Green
 
     # Apply tags to devices
     $tagAction = if ($operation -eq 'add')
@@ -218,20 +259,27 @@ try
     $devicesToClean = @()
     foreach ($device in $devices)
     {
-        $currentTag = if ($device.ExtensionAttribute1)
+        # Get device properties - now directly available from full device object
+        $displayName = $device.DisplayName
+        $operatingSystem = $device.OperatingSystem
+        $extensionAttr = $device.AdditionalProperties.extensionAttributes.extensionAttribute1
+        $deviceId = $device.Id
+
+        $currentTag = if ($extensionAttr)
         {
-            $device.ExtensionAttribute1
+            $extensionAttr
         }
         else
         {
-            $null
+            "No tag"
         }
+        Write-Host " Device: $displayName, Current Tag: $currentTag, OS: $operatingSystem" -ForegroundColor Yellow
 
-        if ($currentTag -ne $tagToApply -and $operation -eq 'add' -and $device.OperatingSystem -eq 'Windows')
+        if ($currentTag -ne $tagToApply -and $operation -eq 'add' -and $operatingSystem -eq 'Windows')
         {
             $devicesToTag += $device
         }
-        elseif ($currentTag -eq $tagToApply -and $operation -eq 'remove' -and $device.OperatingSystem -eq 'Windows')
+        elseif ($currentTag -eq $tagToApply -and $operation -eq 'remove' -and $operatingSystem -eq 'Windows')
         {
             # For removal, we can also track devices to clean if needed
             $devicesToClean += $device
@@ -256,6 +304,7 @@ try
     }
     Write-Host "Found $($targetDevices.Count) devices that need $targetActionNoun" -ForegroundColor Cyan
 
+
     if ($targetDevices.Count -gt 0)
     {
         $successCount = 0
@@ -274,8 +323,13 @@ try
                     {
                         $tagToApply
                     }
+
+                    Write-Host "  Updating device $($device.DisplayName) (ID: $($device.Id))..." -ForegroundColor DarkGray
+
                     $params = @{
-                        "extensionAttribute1" = $tagValueToApply
+                        "extensionAttributes" = @{
+                            "extensionAttribute1" = $tagValueToApply
+                        }
                     }
                     Update-MgDevice -DeviceId $device.Id -BodyParameter $params
                     $successAction = if ($operation -eq 'remove')
@@ -350,8 +404,7 @@ finally
     $logPayload += ""
     $logPayload += "=== Event Snapshot ==="
     $logPayload += ($humanReadable -join "`n`n")
-    Push-OutputBinding -Name log -Value ($logPayload -join "`n")
-    Dis -ErrorAction SilentlyContinue | Out-Null
+    Push-OutputBinding -Name log -Value ($logPayload -join "`n") -ErrorAction SilentlyContinue | Out-Null
 }
 #endregion Main Script
 
