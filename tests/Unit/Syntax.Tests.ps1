@@ -25,6 +25,9 @@ BeforeAll {
     # Combine all PowerShell files for comprehensive testing
     $script:AllPowerShellArtifacts = @($script:AllPowerShellFiles) + @($script:AllModuleFiles) + @($script:AllManifestFiles)
 
+    # Determine if verbose output should be shown based on Pester configuration
+    $script:ShowVerboseOutput = $PesterPreference.Output.Verbosity.Value -in @('Detailed', 'Diagnostic')
+
     # Ensure PSScriptAnalyzer is available
     if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer))
     {
@@ -41,30 +44,39 @@ Describe "PowerShell File Discovery" -Tags 'Discovery', 'Unit', 'Fast' {
         It "Should find PowerShell script files (.ps1) to test" {
             $script:AllPowerShellFiles | Should -Not -BeNullOrEmpty -Because "repository should contain .ps1 files"
             $script:AllPowerShellFiles.Count | Should -BeGreaterThan 0
-            Write-Host "  Found $($script:AllPowerShellFiles.Count) PowerShell script files (.ps1)" -ForegroundColor Cyan
+            if ($script:ShowVerboseOutput)
+            {
+                Write-Host "  Found $($script:AllPowerShellFiles.Count) PowerShell script files (.ps1)" -ForegroundColor Cyan
+            }
         }
 
         It "Should report PowerShell module files (.psm1) if found" {
-            if ($script:AllModuleFiles.Count -gt 0)
+            if ($script:ShowVerboseOutput)
             {
-                Write-Host "  Found $($script:AllModuleFiles.Count) PowerShell module files (.psm1)" -ForegroundColor Cyan
-            }
-            else
-            {
-                Write-Host "  No PowerShell module files (.psm1) found" -ForegroundColor Gray
+                if ($script:AllModuleFiles.Count -gt 0)
+                {
+                    Write-Host "  Found $($script:AllModuleFiles.Count) PowerShell module files (.psm1)" -ForegroundColor Cyan
+                }
+                else
+                {
+                    Write-Host "  No PowerShell module files (.psm1) found" -ForegroundColor Gray
+                }
             }
             # This is informational - not a failure
             $true | Should -Be $true
         }
 
         It "Should report PowerShell manifest files (.psd1) if found" {
-            if ($script:AllManifestFiles.Count -gt 0)
+            if ($script:ShowVerboseOutput)
             {
-                Write-Host "  Found $($script:AllManifestFiles.Count) PowerShell manifest files (.psd1)" -ForegroundColor Cyan
-            }
-            else
-            {
-                Write-Host "  No PowerShell manifest files (.psd1) found" -ForegroundColor Gray
+                if ($script:AllManifestFiles.Count -gt 0)
+                {
+                    Write-Host "  Found $($script:AllManifestFiles.Count) PowerShell manifest files (.psd1)" -ForegroundColor Cyan
+                }
+                else
+                {
+                    Write-Host "  No PowerShell manifest files (.psd1) found" -ForegroundColor Gray
+                }
             }
             # This is informational - not a failure
             $true | Should -Be $true
@@ -73,7 +85,10 @@ Describe "PowerShell File Discovery" -Tags 'Discovery', 'Unit', 'Fast' {
         It "Should have total PowerShell artifacts to validate" {
             $script:AllPowerShellArtifacts | Should -Not -BeNullOrEmpty
             $script:AllPowerShellArtifacts.Count | Should -BeGreaterThan 0
-            Write-Host "  Total PowerShell artifacts to validate: $($script:AllPowerShellArtifacts.Count)" -ForegroundColor Green
+            if ($script:ShowVerboseOutput)
+            {
+                Write-Host "  Total PowerShell artifacts to validate: $($script:AllPowerShellArtifacts.Count)" -ForegroundColor Green
+            }
         }
     }
 }
@@ -184,14 +199,17 @@ Describe "PowerShell File Encoding and Format" -Tags 'Encoding', 'Unit', 'Fast' 
                 $errorMessage = "The following PowerShell files have encoding issues:`n"
                 foreach ($issue in $encodingIssues)
                 {
-                    $errorMessage += "  - [$($issue.Severity)] $($issue.Path): $($issue.Issue)`n"
+                    if ($script:ShowVerboseOutput)
+                    {
+                        $errorMessage += "  - [$($issue.Severity)] $($issue.Path): $($issue.Issue)`n"
+                    }
                 }
 
                 if ($criticalEncodingIssues.Count -gt 0)
                 {
                     $criticalEncodingIssues | Should -BeNullOrEmpty -Because $errorMessage
                 }
-                else
+                elseif ($script:ShowVerboseOutput)
                 {
                     Write-Warning $errorMessage
                 }
@@ -335,7 +353,7 @@ Describe "PowerShell Syntax Validation" -Tags 'Syntax', 'Unit', 'Fast' {
             }
 
             # This is a warning, not a failure
-            if ($problematicFiles.Count -gt 0)
+            if ($problematicFiles.Count -gt 0 -and $script:ShowVerboseOutput)
             {
                 $warningMessage = "`nThe following PowerShell files contain potentially problematic constructs:`n"
                 foreach ($item in $problematicFiles)
@@ -425,42 +443,45 @@ Describe "PowerShell Script Analysis" -Tags 'PSScriptAnalyzer', 'Unit' {
             # Report warnings but don't fail (warnings are informational)
             if ($filesWithWarnings.Count -gt 0)
             {
-                $totalWarnings = ($filesWithWarnings | Measure-Object -Property ViolationCount -Sum).Sum
-                $warningMessage = "`nFound $totalWarnings PSScriptAnalyzer warnings across $($filesWithWarnings.Count) file(s):`n"
-
-                # Group by rule for summary
-                $allWarnings = $filesWithWarnings | ForEach-Object { $_.Violations }
-                $warningsByRule = $allWarnings | Group-Object -Property RuleName | Sort-Object Count -Descending
-
-                $warningMessage += "`nWarnings by rule:`n"
-                foreach ($ruleGroup in $warningsByRule)
+                if ($script:ShowVerboseOutput)
                 {
-                    $warningMessage += "  - $($ruleGroup.Name): $($ruleGroup.Count) occurrence(s)`n"
-                }
+                    $totalWarnings = ($filesWithWarnings | Measure-Object -Property ViolationCount -Sum).Sum
+                    $warningMessage = "`nFound $totalWarnings PSScriptAnalyzer warnings across $($filesWithWarnings.Count) file(s):`n"
 
-                $warningMessage += "`nDetailed warnings:`n"
-                foreach ($file in ($filesWithWarnings | Select-Object -First 10))
-                {
-                    $warningMessage += "`n  - $($file.Path): $($file.ViolationCount) warning(s)`n"
-                    foreach ($violation in ($file.Violations | Select-Object -First 3))
+                    # Group by rule for summary
+                    $allWarnings = $filesWithWarnings | ForEach-Object { $_.Violations }
+                    $warningsByRule = $allWarnings | Group-Object -Property RuleName | Sort-Object Count -Descending
+
+                    $warningMessage += "`nWarnings by rule:`n"
+                    foreach ($ruleGroup in $warningsByRule)
                     {
-                        $warningMessage += "    Line $($violation.Line): $($violation.RuleName)`n"
-                        $warningMessage += "      $($violation.Message)`n"
+                        $warningMessage += "  - $($ruleGroup.Name): $($ruleGroup.Count) occurrence(s)`n"
                     }
-                    if ($file.Violations.Count -gt 3)
+
+                    $warningMessage += "`nDetailed warnings:`n"
+                    foreach ($file in ($filesWithWarnings | Select-Object -First 10))
                     {
-                        $warningMessage += "    ... and $($file.Violations.Count - 3) more`n"
+                        $warningMessage += "`n  - $($file.Path): $($file.ViolationCount) warning(s)`n"
+                        foreach ($violation in ($file.Violations | Select-Object -First 3))
+                        {
+                            $warningMessage += "    Line $($violation.Line): $($violation.RuleName)`n"
+                            $warningMessage += "      $($violation.Message)`n"
+                        }
+                        if ($file.Violations.Count -gt 3)
+                        {
+                            $warningMessage += "    ... and $($file.Violations.Count - 3) more`n"
+                        }
                     }
-                }
 
-                if ($filesWithWarnings.Count -gt 10)
-                {
-                    $warningMessage += "`n  ... and $($filesWithWarnings.Count - 10) more file(s)`n"
-                }
+                    if ($filesWithWarnings.Count -gt 10)
+                    {
+                        $warningMessage += "`n  ... and $($filesWithWarnings.Count - 10) more file(s)`n"
+                    }
 
-                Write-Warning $warningMessage
+                    Write-Warning $warningMessage
+                }
             }
-            else
+            elseif ($script:ShowVerboseOutput)
             {
                 Write-Host "  No PSScriptAnalyzer warnings found!" -ForegroundColor Green
             }
@@ -494,20 +515,23 @@ Describe "PowerShell Script Analysis" -Tags 'PSScriptAnalyzer', 'Unit' {
             # Report information but don't fail
             if ($filesWithInfo.Count -gt 0)
             {
-                $totalInfo = ($filesWithInfo | Measure-Object -Property ViolationCount -Sum).Sum
-                Write-Host "`n  Found $totalInfo PSScriptAnalyzer informational messages across $($filesWithInfo.Count) file(s)" -ForegroundColor Cyan
-
-                # Group by rule for summary
-                $allInfo = $filesWithInfo | ForEach-Object { $_.Violations }
-                $infoByRule = $allInfo | Group-Object -Property RuleName | Sort-Object Count -Descending | Select-Object -First 5
-
-                Write-Host "  Top informational rules:" -ForegroundColor Cyan
-                foreach ($ruleGroup in $infoByRule)
+                if ($script:ShowVerboseOutput)
                 {
-                    Write-Host "    - $($ruleGroup.Name): $($ruleGroup.Count) occurrence(s)" -ForegroundColor Gray
+                    $totalInfo = ($filesWithInfo | Measure-Object -Property ViolationCount -Sum).Sum
+                    Write-Host "`n  Found $totalInfo PSScriptAnalyzer informational messages across $($filesWithInfo.Count) file(s)" -ForegroundColor Cyan
+
+                    # Group by rule for summary
+                    $allInfo = $filesWithInfo | ForEach-Object { $_.Violations }
+                    $infoByRule = $allInfo | Group-Object -Property RuleName | Sort-Object Count -Descending | Select-Object -First 5
+
+                    Write-Host "  Top informational rules:" -ForegroundColor Cyan
+                    foreach ($ruleGroup in $infoByRule)
+                    {
+                        Write-Host "    - $($ruleGroup.Name): $($ruleGroup.Count) occurrence(s)" -ForegroundColor Gray
+                    }
                 }
             }
-            else
+            elseif ($script:ShowVerboseOutput)
             {
                 Write-Host "  No informational messages found!" -ForegroundColor Green
             }
@@ -536,7 +560,7 @@ Describe "PowerShell Script Analysis" -Tags 'PSScriptAnalyzer', 'Unit' {
                 }
             }
 
-            if ($filesWithAliases.Count -gt 0)
+            if ($filesWithAliases.Count -gt 0 -and $script:ShowVerboseOutput)
             {
                 $warningMessage = "`nThe following files use cmdlet aliases (should use full cmdlet names):`n"
                 foreach ($file in ($filesWithAliases | Select-Object -First 5))
@@ -571,7 +595,7 @@ Describe "PowerShell Script Analysis" -Tags 'PSScriptAnalyzer', 'Unit' {
                 }
             }
 
-            if ($filesWithUnapprovedVerbs.Count -gt 0)
+            if ($filesWithUnapprovedVerbs.Count -gt 0 -and $script:ShowVerboseOutput)
             {
                 $errorMessage = "`nThe following files have functions with unapproved verbs:`n"
                 foreach ($file in $filesWithUnapprovedVerbs)
@@ -606,7 +630,7 @@ Describe "PowerShell Script Analysis" -Tags 'PSScriptAnalyzer', 'Unit' {
                 }
             }
 
-            if ($filesWithWriteHost.Count -gt 0)
+            if ($filesWithWriteHost.Count -gt 0 -and $script:ShowVerboseOutput)
             {
                 $infoMessage = "`n$($filesWithWriteHost.Count) file(s) use Write-Host. Consider using Write-Output, Write-Verbose, or Write-Information for better pipeline support.`n"
                 Write-Host $infoMessage -ForegroundColor Cyan
