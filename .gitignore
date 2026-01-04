@@ -1,7 +1,7 @@
 
 # Azure Functions artifacts
 **/bin/**
-!Modules/**
+!modules/**
 obj
 appsettings.json
 local.settings.json

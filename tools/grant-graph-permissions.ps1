@@ -1,3 +1,4 @@
+#requires -Version 7
 <#
 .SYNOPSIS
     Grants Microsoft Graph API permissions to the Function App's user-assigned managed identity.
@@ -87,6 +88,10 @@ Write-Host "`nStep 2: Getting required permissions..." -ForegroundColor Cyan
 # Define required permissions
 $requiredPermissions = @(
     @{
+        Name        = "Device.ReadWrite.All"
+        Description = "Read and write devices"
+    }
+    @{
         Name        = "Directory.Read.All"
         Description = "Read all subscriptions"
     },
@@ -173,9 +178,11 @@ foreach ($permission in $permissionsToGrant)
             -ServicePrincipalId $PrincipalId `
             -ResourceId $graphSP.Id `
             -AppRoleId $permission.RoleId
-
-        Write-Host "  ✅ Successfully granted: $($permission.Name)" -ForegroundColor Green
-        $grantedCount++
+        if ($assignment)
+        {
+            Write-Host "  ✅ Successfully granted: $($permission.Name)" -ForegroundColor Green
+            $grantedCount++
+        }
     }
     catch
     {

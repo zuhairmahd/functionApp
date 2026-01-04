@@ -6,3 +6,4 @@ __queuestorage__
 local.settings.json
 tests/
 tools/
+# Note: modules/ folder is intentionally NOT ignored - it must be deployed to Azure

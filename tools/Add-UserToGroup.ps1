@@ -1,17 +1,33 @@
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$UserPrincipalName,
+    [Parameter()]
+    [string]$UserPrincipalName = "zuhair@arabictutor.com",
     [string]$group,
     [switch]$remove
 )
 
 $groupId = if ($group)
 {
-    $group 
+    $group
 }
 else
 {
-    "817f24e3-ba30-41fb-a932-cc912fa08c73" 
+    "817f24e3-ba30-41fb-a932-cc912fa08c73"
+}
+
+#check if we are connected to graph
+if (-not (Get-MgContext))
+{
+    Write-Host "Not connected to Microsoft Graph.  Will try to connect..." -ForegroundColor Yellow
+    try
+    {
+        Connect-MgGraph -Scopes "Group.ReadWrite.All", "User.Read.All", "Device.ReadWrite.All                   " -NoWelcome -ErrorAction Stop
+        Write-Host "Connected to Microsoft Graph successfully." -ForegroundColor Green
+    }
+    catch
+    {
+        Write-Host "Failed to connect to Microsoft Graph. Please ensure you have the necessary permissions." -ForegroundColor Red
+        exit 1
+    }
 }
 
 $success = $false
