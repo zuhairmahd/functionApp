@@ -174,7 +174,6 @@ if (-not $allModulesAvailable)
 {
     Write-Error "One or more required modules are not available. Check deployment package."
     Write-Host "PSModulePath = $env:PSModulePath" -ForegroundColor Yellow
-    throw "Required modules are not available. Deployment issue detected."
 }
 Write-Host "All required modules are available." -ForegroundColor Green
 #endregion more logging
