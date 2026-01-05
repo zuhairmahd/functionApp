@@ -196,53 +196,13 @@ try
     # get user devices and information
     $user = Get-MgUser -UserId $userId -ErrorAction Stop
     $group = Get-MgGroup -GroupId $groupId -ErrorAction Stop
-    $registeredDevices = Get-MgUserRegisteredDevice -UserId $userId -ErrorAction Stop
+    $devices = Get-MgUserRegisteredDevice -UserId $userId
     $userDisplayName = $user.DisplayName
     $userPrincipalName = $user.UserPrincipalName
     $groupName = $group.DisplayName
     Write-Host "User $userDisplayName ($userPrincipalName) was $(if ($operation -eq 'add') { 'added to' } else { 'removed from' }) group $groupName" -ForegroundColor Green
     Write-Host "Getting devices for user $userDisplayName ($userPrincipalName)..." -ForegroundColor Cyan
-    Write-Host "Found a total of $($registeredDevices.count) devices registered to user $userDisplayName ($userPrincipalName)" -ForegroundColor Green
-
-    # Get full device objects with extension attributes (Windows devices only), since they are supposedly not returned in registered devices
-    $devices = @()
-    foreach ($regDevice in $registeredDevices)
-    {
-        # Check if this is a Windows device before fetching full details
-        $osType = if ($regDevice.OperatingSystem)
-        {
-            $regDevice.OperatingSystem
-        }
-        else
-        {
-            $regDevice.AdditionalProperties.operatingSystem
-        }
-        # Skip non-Windows devices to reduce API calls
-        if ($osType -ne 'Windows')
-        {
-            Write-Host "  Skipping non-Windows device: $($regDevice.AdditionalProperties.displayName) (OS: $osType)" -ForegroundColor DarkGray
-            continue
-        }
-        $deviceId = if ($regDevice.Id)
-        {
-            $regDevice.Id
-        }
-        else
-        {
-            $regDevice.AdditionalProperties.id
-        }
-        try
-        {
-            $fullDevice = Get-MgDevice -DeviceId $deviceId -ErrorAction Stop
-            Write-Host "  Retrieved Windows device: $($fullDevice.DisplayName) (ID: $($fullDevice.Id))" -ForegroundColor DarkGray
-            $devices += $fullDevice
-        }
-        catch
-        {
-            Write-Warning "Could not retrieve device $deviceId : $_"
-        }
-    }
-    Write-Host "Found $($devices.count) Windows devices registered to user $userDisplayName ($userPrincipalName)" -ForegroundColor Green
+    Write-Host "Found a total of $($devices.count) devices registered to user $userDisplayName ($userPrincipalName)" -ForegroundColor Green
 
     # Apply tags to devices
     $tagAction = if ($operation -eq 'add')
@@ -256,14 +216,13 @@ try
     Write-Host "`n$tagAction for devices..." -ForegroundColor Cyan
 
     $devicesToTag = @()
-    $devicesToClean = @()
     foreach ($device in $devices)
     {
         # Get device properties - now directly available from full device object
-        $displayName = $device.DisplayName
-        $operatingSystem = $device.OperatingSystem
-        $extensionAttr = $device.AdditionalProperties.extensionAttributes.extensionAttribute1
-        $deviceId = $device.Id
+        $displayName = $device.additionalProperties.displayName
+        $operatingSystem = $device.additionalProperties.operatingSystem
+        $extensionAttr = $device.additionalProperties.extensionAttributes.extensionAttribute1
+        $deviceId = $device.additionalProperties.id
 
         $currentTag = if ($extensionAttr)
         {
@@ -273,102 +232,80 @@ try
         {
             "No tag"
         }
-        Write-Host " Device: $displayName, Current Tag: $currentTag, OS: $operatingSystem" -ForegroundColor Yellow
+
+        Write-Verbose " Evaluating device: $displayName, Current Tag: $currentTag, OS: $operatingSystem"
 
         if ($currentTag -ne $tagToApply -and $operation -eq 'add' -and $operatingSystem -eq 'Windows')
         {
+            Write-Host " Device: $displayName, Current Tag: $currentTag, OS: $operatingSystem" -ForegroundColor Yellow
+            Write-Host "The device will be tagged with '$tagToApply'" -ForegroundColor Yellow
             $devicesToTag += $device
         }
         elseif ($currentTag -eq $tagToApply -and $operation -eq 'remove' -and $operatingSystem -eq 'Windows')
         {
-            # For removal, we can also track devices to clean if needed
-            $devicesToClean += $device
+            $devicesToTag += $device
+            Write-Host " Device: $displayName, Current Tag: $currentTag, OS: $operatingSystem" -ForegroundColor Yellow
+            Write-Host "The tag '$tagToApply' will be removed from the device" -ForegroundColor Yellow
+        }
+        elseif ($operatingSystem -eq 'Windows')
+        {
+            Write-Host " Device: $displayName, Current Tag: $currentTag, OS: $operatingSystem will not be modified." -ForegroundColor DarkGray
         }
     }
-
-    $targetDevices = if ($operation -eq 'add')
-    {
-        $devicesToTag
-    }
-    else
-    {
-        $devicesToClean
-    }
-    $targetActionNoun = if ($operation -eq 'add')
-    {
-        'tagging'
-    }
-    else
-    {
-        'tag removal'
-    }
-    Write-Host "Found $($targetDevices.Count) devices that need $targetActionNoun" -ForegroundColor Cyan
+    Write-Host "Found $($devicesToTag.Count) devices to $operation" -ForegroundColor Cyan
 
 
-    if ($targetDevices.Count -gt 0)
+    if ($devicesToTag.Count -gt 0)
     {
         $successCount = 0
         $failureCount = 0
-        foreach ($device in $targetDevices)
+        foreach ($device in $devicesToTag                           )
         {
-            if (-not $WhatIf)
+            try
             {
-                try
+                $tagValueToApply = if ($operation -eq 'remove')
                 {
-                    $tagValueToApply = if ($operation -eq 'remove')
-                    {
-                        $null
-                    }
-                    else
-                    {
-                        $tagToApply
-                    }
-
-                    Write-Host "  Updating device $($device.DisplayName) (ID: $($device.Id))..." -ForegroundColor DarkGray
-
-                    $params = @{
-                        "extensionAttributes" = @{
-                            "extensionAttribute1" = $tagValueToApply
-                        }
-                    }
-                    Update-MgDevice -DeviceId $device.Id -BodyParameter $params
-                    $successAction = if ($operation -eq 'remove')
-                    {
-                        'Removed tag from'
-                    }
-                    else
-                    {
-                        'Applied tag to'
-                    }
-                    Write-Host " $successAction device: $($device.DisplayName)" -ForegroundColor Green
-                    $successCount++
+                    ""
                 }
-                catch
+                else
                 {
-                    $failureAction = if ($operation -eq 'remove')
-                    {
-                        'remove tag from'
-                    }
-                    else
-                    {
-                        'tag device'
-                    }
-                    Write-Error " Failed to $failureAction $($device.DisplayName)"
-                    $failureCount++
+                    $tagToApply
                 }
+                $deviceId = $device.Id
+                $displayName = $device.additionalProperties.displayName
+                Write-Host "  Updating device $displayName (ID: $deviceId                                       )..." -ForegroundColor DarkGray
+
+                $params = @{
+                    "extensionAttributes" = @{
+                        "extensionAttribute1" = $tagValueToApply
+                    }
+                }
+                Update-MgDevice -DeviceId $deviceId -BodyParameter $params
+                $successAction = if ($operation -eq 'remove')
+                {
+                    'Removed tag from'
+                }
+                else
+                {
+                    'Applied tag to'
+                }
+                Write-Host " $successAction device: $($device.additionalProperties.displayName)" -ForegroundColor Green
+                $successCount++
             }
-            else
+            catch
             {
-                $whatIfAction = if ($operation -eq 'remove')
+                $failureAction = if ($operation -eq 'remove')
                 {
                     'remove tag from'
                 }
                 else
                 {
-                    'tag'
+                    'tag device'
                 }
-                Write-Host " [WHATIF] Would $($whatIfAction): $($device.DisplayName)" -ForegroundColor Yellow
+                Write-Error " Failed to $failureAction $($device.additionalProperties.displayName)"
+                $failureCount++
             }
+
         }
 
         $operationSummary = if ($operation -eq 'remove')
@@ -392,7 +329,6 @@ try
 
     Write-Host "`nScript completed successfully" -ForegroundColor Green
     Write-Host " Devices tagged: $($devicesToTag.Count)" -ForegroundColor Cyan
-    Write-Host " Devices cleaned: $($devicesToClean.Count)" -ForegroundColor Cyan
 }
 catch
 {
