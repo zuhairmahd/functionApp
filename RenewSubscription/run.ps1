@@ -59,12 +59,9 @@ Write-Verbose "Received event: $($Timer      |Out-String)"
 Write-Host "received event: $($Timer | Out-String)" -ForegroundColor Cyan
 #endregion log received event
 
-$managedIdentityClientId = "0ed597a6-5cca-4c6f-b51e-10510010e936"
-
 # Import required modules
 Import-Module Microsoft.Graph.Authentication
 Import-Module Microsoft.Graph.ChangeNotifications
-$ErrorActionPreference = "Stop"
 
 # Queue storage diagnostic logging
 $diagnosticLog = @()
@@ -78,9 +75,9 @@ Write-Host "Execution time: $((Get-Date).ToString('o'))"
 $diagnosticLog += "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Execution started"
 $diagnosticLog += "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Checking GRAPH_SUBSCRIPTION_ID environment variable"
 
-# Get subscription ID from environment variable or App Configuration
+# Get subscription and client ID from environment variable or App Configuration
 $graphSubscriptionId = $env:GRAPH_SUBSCRIPTION_ID
-
+$managedIdentityClientId = $env:AZURE_CLIENT_ID
 if (-not $graphSubscriptionId)
 {
     Write-Warning "No GRAPH_SUBSCRIPTION_ID found in environment variables"
@@ -93,10 +90,12 @@ if (-not $graphSubscriptionId)
     {
         $diagnosticLog += "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Connecting to Microsoft Graph using Managed Identity"
         Connect-MgGraph -Identity -ClientId $managedIdentityClientId -NoWelcome
+        Write-Host "Connected to Microsoft Graph"
         $diagnosticLog += "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Successfully connected to Microsoft Graph"
 
         $diagnosticLog += "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Querying all subscriptions"
         $allSubscriptions = Get-MgSubscription -All
+        Write-Host "Got $($allSubscriptions.Count) total subscriptions  "
         $diagnosticLog += "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Found $($allSubscriptions.Count) total subscription(s)"
 
         # Filter for subscriptions that use EventGrid and match our resource
@@ -104,7 +103,7 @@ if (-not $graphSubscriptionId)
             $_.NotificationUrl -like "*EventGrid*" -and
             $_.Resource -eq "groups"
         }
-
+        Write-Host "Filtering for subscriptions with resource 'groups' and EventGrid notification URL"
         $diagnosticLog += "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Filtering for EventGrid subscriptions with 'groups' resource"
 
         if ($relevantSubscriptions.Count -eq 0)
@@ -201,6 +200,7 @@ else
         # Client ID: 0ed597a6-5cca-4c6f-b51e-10510010e936
         $diagnosticLog += "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Connecting to Microsoft Graph using Managed Identity"
         Connect-MgGraph -Identity -ClientId $managedIdentityClientId -NoWelcome
+        Write-Host "Connected to Microsoft Graph"
         $diagnosticLog += "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Successfully connected to Microsoft Graph"
 
         # Get current subscription
@@ -262,3 +262,6 @@ Write-Host "================================================"
 # Push all diagnostic logs to queue storage
 $diagnosticLog += "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] === RenewSubscription Function Completed ==="
 Push-OutputBinding -Name log -Value ($diagnosticLog -join "`n")
+
+Disconnect-MgGraph
+Write-Host "`nDisconnected from Microsoft Graph"
