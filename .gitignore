@@ -13,4 +13,3 @@ __azurite_db*__.json
 
 # Subscription tracking file (contains sensitive subscription IDs)
 subscription-info.json
-event*.json

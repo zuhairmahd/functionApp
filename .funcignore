@@ -3,7 +3,7 @@
 __azurite_db*__.json
 __blobstorage__
 __queuestorage__
-event*.json
+*event*.json
 docs/
 local.settings.json
 tests/
