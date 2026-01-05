@@ -336,11 +336,16 @@ catch
 }
 finally
 {
+    Disconnect-MgGraph
+    Write-Host "Disconnected from Microsoft Graph" -ForegroundColor Cyan
+    Write-Host "Writing event info to storage blob"
     $logPayload = @()
     $logPayload += ""
     $logPayload += "=== Event Snapshot ==="
     $logPayload += ($humanReadable -join "`n`n")
     Push-OutputBinding -Name log -Value ($logPayload -join "`n") -ErrorAction SilentlyContinue | Out-Null
+    Write-Host "Event info written to storage blob"
 }
 #endregion Main Script
 
+Write-Host "Function execution completed." -ForegroundColor Green
