@@ -4,7 +4,7 @@ __azurite_db*__.json
 __blobstorage__
 __queuestorage__
 event*.json
-*.md
+docs/
 local.settings.json
 tests/
 tools/
