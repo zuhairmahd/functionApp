@@ -109,17 +109,17 @@ try
     $context = Get-AzContext -ErrorAction Stop
     if ($null -eq $context -or $null -eq $context.Account)
     {
-        Write-Host "Not logged in to Azure. Please authenticate." -ForegroundColor Yellow
+        Write-Host "Not logged in to Azure. Connecting..." -ForegroundColor Yellow
         Connect-AzAccount
         # Verify login was successful
         $context = Get-AzContext -ErrorAction Stop
         if ($null -eq $context -or $null -eq $context.Account)
         {
-            Write-Host "Failed to authenticate to Azure. Exiting." -ForegroundColor Red
+            Write-Host "❌ Failed to authenticate to Azure. Exiting." -ForegroundColor Red
             exit
         }
     }
-    Write-Host "Authenticated as: $($context.Account.Id)" -ForegroundColor Green
+    Write-Host "✅ Already authenticated as: $($context.Account.Id)" -ForegroundColor Green
 }
 catch
 {
@@ -133,10 +133,10 @@ catch
         $context = Get-AzContext -ErrorAction Stop
         if ($null -eq $context -or $null -eq $context.Account)
         {
-            Write-Host "Failed to authenticate to Azure. Exiting." -ForegroundColor Red
+            Write-Host "❌ Failed to authenticate to Azure. Exiting." -ForegroundColor Red
             exit
         }
-        Write-Host "Authenticated as: $($context.Account.Id)" -ForegroundColor Green
+        Write-Host "✅ Authenticated as: $($context.Account.Id)" -ForegroundColor Green
     }
     catch
     {

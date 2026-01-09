@@ -19,6 +19,18 @@ Write-Host "Checking Microsoft Graph subscriptions..." -ForegroundColor Cyan
 Write-Host ""
 
 try {
+    # Check if connected to Microsoft Graph
+    $context = Get-MgContext
+    if (-not $context) {
+        Write-Host "Not connected to Microsoft Graph." -ForegroundColor Red
+        Write-Host "Please connect first:" -ForegroundColor Yellow
+        Write-Host "  Connect-MgGraph -Scopes 'Subscription.Read.All'" -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host "Connected as: $($context.Account)" -ForegroundColor Green
+    Write-Host ""
+
     # Get all subscriptions
     $subscriptions = Get-MgSubscription -All
 

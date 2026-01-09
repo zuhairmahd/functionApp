@@ -40,7 +40,7 @@ if (-not $context) {
     Connect-MgGraph -Scopes "Subscription.ReadWrite.All" -NoWelcome
 }
 else {
-    Write-Host "✅ Connected as: $($context.Account)" -ForegroundColor Green
+    Write-Host "✅ Already connected as: $($context.Account)" -ForegroundColor Green
 }
 
 # Try to get the subscription details first

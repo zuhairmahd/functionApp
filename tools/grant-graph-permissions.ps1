@@ -47,15 +47,26 @@ try
     $context = Get-AzContext -ErrorAction Stop
     if ($null -eq $context)
     {
-        Write-Host "Not logged in to Azure. Please run Connect-AzAccount" -ForegroundColor Red
-        exit 1
+        Write-Host "Not logged in to Azure. Connecting..." -ForegroundColor Yellow
+        Connect-AzAccount
     }
-    Write-Host "✅ Connected to Azure as: $($context.Account.Id)" -ForegroundColor Green
+    else
+    {
+        Write-Host "✅ Already connected to Azure as: $($context.Account.Id)" -ForegroundColor Green
+    }
 }
 catch
 {
-    Write-Host "❌ Not logged in to Azure. Please run Connect-AzAccount" -ForegroundColor Red
-    exit 1
+    Write-Host "Not logged in to Azure. Connecting..." -ForegroundColor Yellow
+    try
+    {
+        Connect-AzAccount
+    }
+    catch
+    {
+        Write-Host "❌ Failed to connect to Azure: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
 }
 
 Write-Host "`nStep 1: Getting Microsoft Graph Service Principal..." -ForegroundColor Cyan

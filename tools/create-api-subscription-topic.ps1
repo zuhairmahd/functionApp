@@ -52,7 +52,7 @@ Import-Module Microsoft.Graph.Authentication
 # Azure and EventGrid configuration
 $subscriptionId = "8a89e116-824d-4eeb-8ef4-16dcc1f0959b"
 $resourceGroup = "groupchangefunction"
-$partnerTopic = "default"
+$partnerTopic = "groupchangefunctiontopic"
 $location = "centralus"
 
 # Set expiration to maximum allowed (4230 minutes = ~3 days)

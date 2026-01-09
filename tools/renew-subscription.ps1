@@ -26,6 +26,18 @@ param(
 $renewalThreshhold = 24
 Import-Module Microsoft.Graph.ChangeNotifications
 
+# Check if already connected to Microsoft Graph
+$context = Get-MgContext
+if (-not $context)
+{
+    Write-Host "Connecting to Microsoft Graph..." -ForegroundColor Cyan
+    Connect-MgGraph -Scopes "Subscription.ReadWrite.All" -NoWelcome
+}
+else
+{
+    Write-Host "✅ Already connected as: $($context.Account)" -ForegroundColor Green
+}
+
 # If no SubscriptionId provided, try to read from saved file
 if (-not $SubscriptionId)
 {
@@ -41,9 +53,8 @@ if (-not $SubscriptionId)
         # Try to find subscription by querying all subscriptions for this resource
         try
         {
-            $diagnosticLog += "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Connecting to Microsoft Graph using Managed Identity"
-            Connect-MgGraph -NoWelcome
-            Write-Host "Connected to Microsoft Graph"
+            # Connection already checked above, proceed with query
+            Write-Host "Querying all subscriptions..." -ForegroundColor Gray
             $allSubscriptions = Get-MgSubscription -All
             Write-Host "Got $($allSubscriptions.Count) total subscriptions  "
 

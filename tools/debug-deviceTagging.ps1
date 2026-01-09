@@ -7,8 +7,17 @@ $userId = "c2fb973c-099e-4ab6-bef4-aad5a7b915fc"
 $tagToApply = 'mfabackup'
 try
 {
-    # Connect to Microsoft Graph
-    Connect-MgGraph -NoWelcome
+    # Check if already connected to Microsoft Graph
+    $context = Get-MgContext
+    if (-not $context)
+    {
+        Write-Host "Connecting to Microsoft Graph..." -ForegroundColor Cyan
+        Connect-MgGraph -Scopes "User.Read.All", "Device.ReadWrite.All" -NoWelcome
+    }
+    else
+    {
+        Write-Host "✅ Already connected to Microsoft Graph as: $($context.Account)" -ForegroundColor Green
+    }
     Write-Host "Successfully connected to Microsoft Graph" -ForegroundColor Green
 
     # get user devices and information

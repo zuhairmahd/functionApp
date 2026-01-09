@@ -14,20 +14,25 @@ else
     "817f24e3-ba30-41fb-a932-cc912fa08c73"
 }
 
-#check if we are connected to graph
-if (-not (Get-MgContext))
+# Check if we are connected to Microsoft Graph
+$context = Get-MgContext
+if (-not $context)
 {
-    Write-Host "Not connected to Microsoft Graph.  Will try to connect..." -ForegroundColor Yellow
+    Write-Host "Not connected to Microsoft Graph. Connecting..." -ForegroundColor Yellow
     try
     {
-        Connect-MgGraph -Scopes "Group.ReadWrite.All", "User.Read.All", "Device.ReadWrite.All                   " -NoWelcome -ErrorAction Stop
-        Write-Host "Connected to Microsoft Graph successfully." -ForegroundColor Green
+        Connect-MgGraph -Scopes "Group.ReadWrite.All", "User.Read.All", "Device.ReadWrite.All" -NoWelcome -ErrorAction Stop
+        Write-Host "✅ Connected to Microsoft Graph successfully." -ForegroundColor Green
     }
     catch
     {
-        Write-Host "Failed to connect to Microsoft Graph. Please ensure you have the necessary permissions." -ForegroundColor Red
+        Write-Host "❌ Failed to connect to Microsoft Graph. Please ensure you have the necessary permissions." -ForegroundColor Red
         exit 1
     }
+}
+else
+{
+    Write-Host "✅ Already connected to Microsoft Graph as: $($context.Account)" -ForegroundColor Green
 }
 
 $success = $false

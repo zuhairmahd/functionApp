@@ -82,8 +82,12 @@ try
         Write-Host "Not logged in to Azure. Connecting..." -ForegroundColor Yellow
         Connect-AzAccount
         $context = Get-AzContext -ErrorAction Stop
+        Write-Host "✅ Authenticated as: $($context.Account.Id)`n" -ForegroundColor Green
     }
-    Write-Host "✅ Authenticated as: $($context.Account.Id)`n" -ForegroundColor Green
+    else
+    {
+        Write-Host "✅ Already authenticated as: $($context.Account.Id)`n" -ForegroundColor Green
+    }
 }
 catch
 {
