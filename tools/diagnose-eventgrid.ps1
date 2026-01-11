@@ -346,8 +346,22 @@ function Test-GraphApiPermissions()
 
         $sp = $spInfo | ConvertFrom-Json
 
-        # Get app role assignments for Microsoft Graph
+        # Get Microsoft Graph service principal first to get its object ID
         $graphAppId = "00000003-0000-0000-c000-000000000000"  # Microsoft Graph App ID
+        $graphSpJson = az ad sp show --id $graphAppId -o json 2>&1
+        if ($LASTEXITCODE -ne 0)
+        {
+            return @{
+                HasAccess   = $false
+                Error       = "Unable to retrieve Microsoft Graph service principal"
+                Permissions = @()
+            }
+        }
+
+        $graphSp = $graphSpJson | ConvertFrom-Json
+        $graphObjectId = $graphSp.id  # This is the object ID we need for filtering
+
+        # Get app role assignments for Microsoft Graph
         $appRoleAssignments = az rest `
             --method GET `
             --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$($sp.id)/appRoleAssignments" `
@@ -364,20 +378,8 @@ function Test-GraphApiPermissions()
         }
 
         $assignments = ($appRoleAssignments | ConvertFrom-Json).value
-        $graphAssignments = $assignments | Where-Object { $_.resourceId -eq $graphAppId }
-
-        # Get Microsoft Graph service principal to resolve role names
-        $graphSpJson = az ad sp show --id $graphAppId -o json 2>&1
-        if ($LASTEXITCODE -ne 0)
-        {
-            return @{
-                HasAccess   = $false
-                Error       = "Unable to retrieve Microsoft Graph service principal"
-                Permissions = @()
-            }
-        }
-
-        $graphSp = $graphSpJson | ConvertFrom-Json
+        # Filter by the Graph service principal's object ID (not application ID)
+        $graphAssignments = $assignments | Where-Object { $_.resourceId -eq $graphObjectId }
         $permissions = @()
 
         foreach ($assignment in $graphAssignments)
@@ -393,7 +395,8 @@ function Test-GraphApiPermissions()
         $requiredPermissions = @(
             "Group.Read.All",
             "User.Read.All",
-            "Device.Read.All"
+            "Device.ReadWrite.All",  # ReadWrite.All includes Read.All
+            "Directory.Read.All"
         )
 
         $missingPermissions = $requiredPermissions | Where-Object { $_ -notin $permissions }

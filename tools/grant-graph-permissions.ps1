@@ -1,4 +1,3 @@
-#requires -Version 7
 <#
 .SYNOPSIS
     Grants Microsoft Graph API permissions to the Function App's user-assigned managed identity.
@@ -9,37 +8,169 @@
     automatically renew Graph API subscriptions using the managed identity.
 
 .PARAMETER ManagedIdentityName
-    The name of the user-assigned managed identity. Default: groupchangefunction-identities-9bef22
+    The name of the user-assigned managed identity. Leave empty for auto-detection.
+    Default: "groupFunctionApp-identities-82cd94"
 
 .PARAMETER PrincipalId
-    The principal (object) ID of the managed identity. Default: e4ad71a2-53c3-467f-a553-bc7eebf711b5
+    The principal (object) ID of the managed identity. If not provided, the script will attempt
+    to retrieve it from the Function App configuration.
+    Default: "" (auto-detect)
+
+.PARAMETER FunctionAppName
+    The name of the Function App that uses the managed identity.
+    Default: "groupChangeFunctionApp"
+
+.PARAMETER ResourceGroupName
+    The name of the resource group containing the Function App.
+    Default: "groupFunctionApp"
+
+.PARAMETER SubscriptionId
+    The Azure subscription ID containing the resources.
+    Default: "8a89e116-824d-4eeb-8ef4-16dcc1f0959b"
 
 .EXAMPLE
     .\grant-graph-permissions.ps1
-    Grants permissions to the default managed identity
+    Grants permissions using auto-detection from Function App
+
+.EXAMPLE
+    .\grant-graph-permissions.ps1 -PrincipalId "e4ad71a2-53c3-467f-a553-bc7eebf711b5"
+    Grants permissions to a specific managed identity
 
 .NOTES
-    Requires:
+    Prerequisites:
     - Az.Accounts module
     - Az.Resources module
+    - Azure CLI (for auto-detection)
     - Global Administrator or Privileged Role Administrator role in Entra ID
+
+    Related Scripts:
+    - grant-azure-resource-permissions.ps1 - Grants Azure RBAC permissions
+    - diagnose-eventgrid.ps1 - Diagnoses permission issues and validates configuration
 #>
 [CmdletBinding()]
 param(
     [Parameter()]
-    [string]$ManagedIdentityName = "groupchangefunction-identities-9bef22",
+    [string]$ManagedIdentityName = "groupFunctionApp-identities-82cd94",
     [Parameter()]
-    [string]$PrincipalId = "e4ad71a2-53c3-467f-a553-bc7eebf711b5"
+    [string]$PrincipalId = "",
+    [Parameter()]
+    [string]$FunctionAppName = "groupChangeFunctionApp",
+    [Parameter()]
+    [string]$ResourceGroupName = "groupFunctionApp",
+    [Parameter()]
+    [string]$SubscriptionId = "8a89e116-824d-4eeb-8ef4-16dcc1f0959b"
 )
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "================================================" -ForegroundColor Cyan
+Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host "Grant Microsoft Graph Permissions to Managed Identity" -ForegroundColor Cyan
-Write-Host "================================================`n" -ForegroundColor Cyan
+Write-Host "================================================================`n" -ForegroundColor Cyan
 
-Write-Host "Managed Identity: $ManagedIdentityName" -ForegroundColor Yellow
-Write-Host "Principal ID: $PrincipalId`n" -ForegroundColor Yellow
+Write-Host "Configuration:" -ForegroundColor Yellow
+Write-Host "  Function App: $FunctionAppName" -ForegroundColor Gray
+Write-Host "  Resource Group: $ResourceGroupName" -ForegroundColor Gray
+Write-Host "  Subscription: $SubscriptionId" -ForegroundColor Gray
+Write-Host "  Managed Identity Name: $ManagedIdentityName" -ForegroundColor Gray
+Write-Host "  Principal ID: $(if ($PrincipalId) { $PrincipalId } else { '[Auto-detect]' })" -ForegroundColor Gray
+Write-Host ""
+
+#region Helper Functions
+function Get-ManagedIdentityPrincipalId()
+{
+    param(
+        [string]$FunctionAppName,
+        [string]$ResourceGroupName,
+        [string]$SubscriptionId
+    )
+
+    Write-Host "Retrieving managed identity configuration..." -ForegroundColor Cyan
+
+    try
+    {
+        $identityJson = az functionapp identity show `
+            --name $FunctionAppName `
+            --resource-group $ResourceGroupName `
+            --subscription $SubscriptionId `
+            -o json 2>&1
+
+        if ($LASTEXITCODE -ne 0)
+        {
+            throw "Failed to retrieve function app identity: $identityJson"
+        }
+
+        $identity = $identityJson | ConvertFrom-Json
+
+        # Check identity type
+        if ($identity.type -eq "UserAssigned")
+        {
+            $userAssignedIdentities = @($identity.userAssignedIdentities.PSObject.Properties)
+            if ($userAssignedIdentities.Count -gt 0)
+            {
+                $firstIdentity = $userAssignedIdentities[0].Value
+                $principalId = $firstIdentity.principalId
+                $clientId = $firstIdentity.clientId
+
+                Write-Host "  Identity Type: User-Assigned Managed Identity" -ForegroundColor Green
+                Write-Host "  Principal ID: $principalId" -ForegroundColor Gray
+                Write-Host "  Client ID: $clientId" -ForegroundColor Gray
+
+                return $principalId
+            }
+        }
+        elseif ($identity.type -like "*SystemAssigned*")
+        {
+            $principalId = $identity.principalId
+            Write-Host "  Identity Type: System-Assigned Managed Identity" -ForegroundColor Green
+            Write-Host "  Principal ID: $principalId" -ForegroundColor Gray
+
+            return $principalId
+        }
+        else
+        {
+            throw "No managed identity configured for Function App: $FunctionAppName"
+        }
+    }
+    catch
+    {
+        Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
+        throw
+    }
+}
+#endregion
+
+#region Step 0: Get or Validate Principal ID
+Write-Host "`n[Step 0] Retrieving Managed Identity Principal ID" -ForegroundColor Cyan
+Write-Host "================================================================" -ForegroundColor Cyan
+
+if ([string]::IsNullOrEmpty($PrincipalId))
+{
+    Write-Host "No Principal ID provided. Auto-detecting from Function App..." -ForegroundColor Yellow
+    try
+    {
+        $PrincipalId = Get-ManagedIdentityPrincipalId `
+            -FunctionAppName $FunctionAppName `
+            -ResourceGroupName $ResourceGroupName `
+            -SubscriptionId $SubscriptionId
+    }
+    catch
+    {
+        Write-Host "`nFailed to retrieve managed identity. Please provide -PrincipalId parameter." -ForegroundColor Red
+        exit 1
+    }
+}
+else
+{
+    Write-Host "Using provided Principal ID: $PrincipalId" -ForegroundColor Green
+}
+
+if ([string]::IsNullOrEmpty($PrincipalId))
+{
+    Write-Host "`nError: No Principal ID available. Cannot proceed." -ForegroundColor Red
+    exit 1
+}
+Write-Host ""
+#endregion
 
 # Check if user is logged in to Azure
 try
@@ -101,18 +232,18 @@ $requiredPermissions = @(
     @{
         Name        = "Device.ReadWrite.All"
         Description = "Read and write devices"
-    }
-    @{
-        Name        = "Directory.Read.All"
-        Description = "Read all subscriptions"
     },
     @{
-        Name        = "Directory.ReadWrite.All"
-        Description = "Read and write all subscriptions"
+        Name        = "User.Read.All"
+        Description = "Read all users"
     },
     @{
         Name        = "Group.Read.All"
         Description = "Read all groups (for subscription resource)"
+    },
+    @{
+        Name        = "Directory.Read.All"
+        Description = "Read directory data (for subscription management)"
     }
 )
 $permissionsToGrant = @()
@@ -210,9 +341,10 @@ if ($grantedCount -gt 0 -or $skippedCount -gt 0)
 {
     Write-Host "`nThe managed identity now has the required permissions!" -ForegroundColor Green
     Write-Host "`nNext steps:" -ForegroundColor Yellow
-    Write-Host "1. Create the Graph subscription: .\create-api-subscription-topic.ps1" -ForegroundColor White
-    Write-Host "2. Deploy the Function App: func azure functionapp publish groupchangefunction" -ForegroundColor White
-    Write-Host "3. Test the auto-renewal function if you created one" -ForegroundColor White
+    Write-Host "1. Grant Azure RBAC permissions: .\tools\grant-azure-resource-permissions.ps1" -ForegroundColor White
+    Write-Host "2. Create the Graph subscription: .\tools\create-api-subscription-topic.ps1" -ForegroundColor White
+    Write-Host "3. Deploy the Function App: func azure functionapp publish $FunctionAppName" -ForegroundColor White
+    Write-Host "4. Verify configuration: .\tools\diagnose-eventgrid.ps1" -ForegroundColor White
 }
 else
 {
