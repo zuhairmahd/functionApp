@@ -41,6 +41,61 @@ Processes a CloudEvent to sync device tags between the specified user and device
 [CmdletBinding()]
 param($eventGridEvent, $TriggerMetadata)
 
+#region Logging Functions
+# Initialize script-level variable to accumulate log messages
+$script:storageLogBuffer = @()
+function Write-ToStorageLog()
+{
+    <#
+    .SYNOPSIS
+    Appends timestamped messages with log levels to a script-level buffer for later writing to blob storage.
+
+    .DESCRIPTION
+    This function accumulates log messages in a script-scoped variable that will be
+    written to blob storage in the Finally block. Each message is automatically prefixed
+    with a timestamp and log level for better traceability and debugging.
+
+    .PARAMETER Message
+    One or more message strings to append to the log buffer.
+
+    .PARAMETER LogLevel
+    The severity level of the log message. Valid values are: Verbose, Information, Warning, Error.
+    Default: Information
+
+    .EXAMPLE
+    Write-ToStorageLog -Message "Processing started"
+    Logs with default Information level: [2026-01-11 14:30:45] [Information] Processing started
+
+    .EXAMPLE
+    Write-ToStorageLog -Message "Configuration loaded successfully" -LogLevel Information
+    Logs: [2026-01-11 14:30:45] [Information] Configuration loaded successfully
+
+    .EXAMPLE
+    Write-ToStorageLog -Message "Failed to update device" -LogLevel Error
+    Logs: [2026-01-11 14:30:45] [Error] Failed to update device
+
+    .EXAMPLE
+    Write-ToStorageLog -Message @("Step 1 complete", "Step 2 starting") -LogLevel Verbose
+    Logs multiple messages with Verbose level
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Message,
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('Verbose', 'Information', 'Warning', 'Error')]
+        [string]$LogLevel = 'Information'
+    )
+
+    $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    foreach ($msg in $Message)
+    {
+        $formattedMessage = "[$timestamp] [$LogLevel] $msg"
+        $script:storageLogBuffer += $formattedMessage
+    }
+}
+#endregion Logging Functions
+
 #region log received event
 $events = if ($eventGridEvent -is [System.Array])
 {
@@ -75,13 +130,12 @@ $humanReadable = foreach ($evt in $events)
 }
 # Still log to console for quick local verification
 ($humanReadable -join "`n`n") | Write-Output
-$logPayload = @()
-$logPayload += ""
-$logPayload += "=== Event Snapshot ==="
-$logPayload += ($humanReadable -join "`n`n")
-Push-OutputBinding -Name log -Value ($logPayload -join "`n")
-Write-Verbose "Received event: $($eventGridEvent |Out-String)"
-Write-Verbose "Trigger metadata: $($TriggerMetadata | Out-String)"
+
+# Use Write-ToStorageLog to accumulate event information
+Write-ToStorageLog -Message ""
+Write-ToStorageLog -Message "=== Event Snapshot ==="
+Write-ToStorageLog -Message ($humanReadable -join "\n\n")
+
 Write-Output "received event: $($eventGridEvent | Out-String)"
 Write-Output "Trigger metadata: $($TriggerMetadata | Out-String)"
 #endregion log received event
@@ -153,10 +207,16 @@ Write-Output "Variables are as follows:"
 Write-Output " GroupId: $groupId"
 Write-Output " UserId: $userId"
 Write-Output " Operation: $operation ($operationLabel)"
-Write-Output "Operation label: $operationLabel"
+Write-Output " Tag to Apply: $tagToApply"
+Write-ToStorageLog -Message "Variables are as follows:"
+Write-ToStorageLog -Message " GroupId: $groupId"
+Write-ToStorageLog -Message " UserId: $userId"
+Write-ToStorageLog -Message " Operation: $operation ($operationLabel)"
+Write-ToStorageLog -Message " Tag to Apply: $tagToApply"
 # Note: Modules in the Modules/ folder are automatically added to PSModulePath by Azure Functions
 # They will auto-load when first referenced (no manual import needed)
 Write-Output "Validating required modules are available..."
+Write-ToStorageLog -Message "Validating required modules are available..."
 $requiredModules = @(
     'Microsoft.Graph.Authentication',
     'Microsoft.Graph.Groups',
@@ -170,10 +230,12 @@ foreach ($module in $requiredModules)
     if (Get-Module -Name $module -ListAvailable -ErrorAction SilentlyContinue)
     {
         Write-Output " Module '$module' is available."
+        Write-ToStorageLog -Message " Module '$module' is available."
     }
     else
     {
         Write-Error " Module '$module' is not available in PSModulePath"
+        Write-ToStorageLog -Message " Module '$module' is not available in PSModulePath" -LogLevel Error
         $allModulesAvailable = $false
     }
 }
@@ -182,24 +244,22 @@ if (-not $allModulesAvailable)
 {
     Write-Error "One or more required modules are not available. Check deployment package."
     Write-Output "PSModulePath = $env:PSModulePath"
+    Write-ToStorageLog -Message "One or more required modules are not available. Check deployment package." -LogLevel Error
     throw "Missing required modules."
 }
 Write-Output "All required modules are available."
+Write-ToStorageLog -Message "All required modules are available."
 #endregion more logging
 
 #region Main Script
-Write-Output "CloudEvent parsed successfully"
-Write-Output "Group ID: $groupId"
-Write-Output "User ID: $userId"
-Write-Output "Operation: $operationLabel"
-Write-Output " Tag to Apply: $tagToApply"
-
+Write-Output "`nConnecting to Microsoft Graph using Managed Identity..."
+Write-ToStorageLog -Message "Connecting to Microsoft Graph using Managed Identity..."
 try
 {
     # Connect to Microsoft Graph
     Connect-MgGraph -Identity -ClientId $managedIdentityClientId -ErrorAction Stop
     Write-Output "Successfully connected to Microsoft Graph"
-
+    Write-ToStorageLog -Message "Successfully connected to Microsoft Graph"
     # get user devices and information
     $user = Get-MgUser -UserId $userId -ErrorAction Stop
     $group = Get-MgGroup -GroupId $groupId -ErrorAction Stop
@@ -210,7 +270,9 @@ try
     Write-Output "User $userDisplayName ($userPrincipalName) was $(if ($operation -eq 'add') { 'added to' } else { 'removed from' }) group $groupName"
     Write-Output "Getting devices for user $userDisplayName ($userPrincipalName)..."
     Write-Output "Found a total of $($devices.count) devices registered to user $userDisplayName ($userPrincipalName)"
-
+    Write-ToStorageLog -Message "User $userDisplayName ($userPrincipalName) was $(if ($operation -eq 'add') { 'added to' } else { 'removed from' }) group $groupName"
+    Write-ToStorageLog -Message "Getting devices for user $userDisplayName ($userPrincipalName)..."
+    Write-ToStorageLog -Message "Found a total of $($devices.count) devices registered to user $userDisplayName ($userPrincipalName)"
     # Apply tags to devices
     $tagAction = if ($operation -eq 'add')
     {
@@ -221,7 +283,7 @@ try
         "Removing tag '$tagToApply'"
     }
     Write-Output "`n$tagAction for devices..."
-
+    Write-ToStorageLog -Message "$tagAction for devices..."
     $devicesToTag = @()
     foreach ($device in $devices)
     {
@@ -230,7 +292,6 @@ try
         $operatingSystem = $device.additionalProperties.operatingSystem
         $extensionAttr = $device.additionalProperties.extensionAttributes.extensionAttribute1
         $deviceId = $device.additionalProperties.id
-
         $currentTag = if ($extensionAttr)
         {
             $extensionAttr
@@ -239,30 +300,34 @@ try
         {
             "No tag"
         }
-
         Write-Verbose " Evaluating device: $displayName, Current Tag: $currentTag, OS: $operatingSystem"
-
+        Write-ToStorageLog -Message " Evaluating device: $displayName, Current Tag: $currentTag, OS: $operatingSystem" -LogLevel Verbose
         if ($currentTag -ne $tagToApply -and $operation -eq 'add' -and $operatingSystem -eq 'Windows')
         {
             Write-Output " Device: $displayName, Current Tag: $currentTag, OS: $operatingSystem"
+            Write-ToStorageLog -Message " Device: $displayName, Current Tag: $currentTag, OS: $operatingSystem" -LogLevel Verbose
             Write-Output "The device will be tagged with '$tagToApply'"
+            Write-ToStorageLog -Message "The device will be tagged with '$tagToApply'"
             $devicesToTag += $device
         }
         elseif ($currentTag -eq $tagToApply -and $operation -eq 'remove' -and $operatingSystem -eq 'Windows')
         {
             $devicesToTag += $device
             Write-Output " Device: $displayName, Current Tag: $currentTag, OS: $operatingSystem"
-            Write-Output "The tag '$tagToApply' will be removed from the device"
+            Write-ToStorageLog -Message " Device: $displayName, Current Tag: $currentTag, OS: $operatingSystem" -LogLevel Verbose
         }
         elseif ($operatingSystem -eq 'Windows')
         {
             Write-Output " Device: $displayName, Current Tag: $currentTag, OS: $operatingSystem will not be modified."
+            Write-ToStorageLog -Message " Device: $displayName, Current Tag: $currentTag, OS: $operatingSystem will not be modified." -LogLevel Verbose
         }
     }
-    Write-Output "Found $($devicesToTag.Count) devices to $operation"
-
+    Write-Output "Found $($devicesToTag.Count) Windows devices to $operation"
+    Write-ToStorageLog -Message "Found $($devicesToTag.Count) Windows devices to $operation"
     if ($devicesToTag.Count -gt 0)
     {
+        Write-Output "Tagging $($devicesToTag.Count) devices..."
+        Write-ToStorageLog -Message "Tagging $($devicesToTag.Count) devices..."
         $successCount = 0
         $failureCount = 0
         foreach ($device in $devicesToTag                           )
@@ -280,7 +345,7 @@ try
                 $deviceId = $device.Id
                 $displayName = $device.additionalProperties.displayName
                 Write-Output "  Updating device $displayName (ID: $deviceId                                       )..."
-
+                Write-ToStorageLog -Message "  Updating device $displayName (ID: $deviceId)..." -LogLevel Verbose
                 $params = @{
                     "extensionAttributes" = @{
                         "extensionAttribute1" = $tagValueToApply
@@ -296,6 +361,7 @@ try
                     'Applied tag to'
                 }
                 Write-Output " $successAction device: $($device.additionalProperties.displayName)"
+                Write-ToStorageLog -Message " $successAction device: $($device.additionalProperties.displayName)" -LogLevel Verbose
                 $successCount++
             }
             catch
@@ -309,9 +375,9 @@ try
                     'tag device'
                 }
                 Write-Error " Failed to $failureAction $($device.additionalProperties.displayName)"
+                Write-ToStorageLog -Message " Failed to $failureAction $($device.additionalProperties.displayName): $_" -LogLevel Error
                 $failureCount++
             }
-
         }
 
         $operationSummary = if ($operation -eq 'remove')
@@ -326,32 +392,40 @@ try
         {
             $failureRate = [math]::Round(($failureCount / $targetDevices.Count) * 100, 2)
             Write-Output "$operationSummary completed with $failureRate% failure rate ($failureCount / $($targetDevices.Count))"
+            Write-ToStorageLog -Message "$operationSummary completed with $failureRate% failure rate ($failureCount / $($targetDevices.Count))" -LogLevel Warning
         }
         else
         {
             Write-Output "$operationSummary completed successfully for all devices"
+            Write-ToStorageLog -Message "$operationSummary completed successfully for all devices" -LogLevel Information
         }
-    }
 
-    Write-Output "`nScript completed successfully"
-    Write-Output " Devices tagged: $($devicesToTag.Count)"
+        Write-Output "`nScript completed successfully"
+        Write-Output " Devices tagged: $($devicesToTag.Count)"
+        Write-ToStorageLog -Message "Script completed successfully. Devices tagged: $($devicesToTag.Count)                                          "
+    }
 }
 catch
 {
     Write-Error "`nScript failed: $_"
+    Write-ToStorageLog -Message "Script failed: $_" -LogLevel Error
 }
 finally
 {
     Disconnect-MgGraph
     Write-Output "Disconnected from Microsoft Graph"
-    Write-Output "Writing event info to storage blob"
-    $logPayload = @()
-    $logPayload += ""
-    $logPayload += "=== Event Snapshot ==="
-    $logPayload += ($humanReadable -join "`n`n")
-    Push-OutputBinding -Name log -Value ($logPayload -join "`n") -ErrorAction SilentlyContinue | Out-Null
-    Write-Output "Event info written to storage blob"
+    Write-Output "Writing accumulated logs to storage blob"
+    Write-ToStorageLog -Message "Disconnected from Microsoft Graph"
+    # Write the accumulated log buffer to blob storage
+    if ($script:storageLogBuffer.Count -gt 0)
+    {
+        Push-OutputBinding -Name log -Value ($script:storageLogBuffer -join "\n") -ErrorAction SilentlyContinue | Out-Null
+        Write-Output "Successfully wrote $($script:storageLogBuffer.Count) log entries to storage blob"
+    }
+    else
+    {
+        Write-Output "No log entries to write to storage blob"
+    }
 }
 #endregion Main Script
-
 Write-Output "Function execution completed."

@@ -112,7 +112,9 @@ param(
     [Parameter()]
     [switch]$SkipAppInsightsPermissions,
     [Parameter()]
-    [switch]$SkipEventGridPermissions
+    [switch]$SkipEventGridPermissions,
+    [Parameter()]
+    [switch]$AddGithubRoles
 )
 
 $ErrorActionPreference = "Stop"
@@ -663,6 +665,45 @@ else
 }
 #endregion
 
+#region Step 5: Grant GitHub Roles
+if ($AddGithubRoles)
+{
+    Write-Host "`n`n[Step 5] Granting GitHub Roles" -ForegroundColor Cyan
+    Write-Host "================================================================" -ForegroundColor Cyan
+
+    $functionAppScope = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Web/sites/$FunctionAppName"
+
+    Write-Host "Granting Website Contributor role to allow GitHub Actions to deploy..." -ForegroundColor Yellow
+
+    $websiteContributorResult = Grant-RoleAssignment `
+        -PrincipalId $PrincipalId `
+        -RoleName "Website Contributor" `
+        -Scope $functionAppScope `
+        -Description "Deploy and manage Function App via GitHub Actions"
+
+    Write-Host "`nGitHub Roles Summary:" -ForegroundColor Cyan
+    if ($websiteContributorResult.Success)
+    {
+        if ($websiteContributorResult.Skipped)
+        {
+            Write-Host "  Status: Already assigned" -ForegroundColor Green
+        }
+        else
+        {
+            Write-Host "  Status: Successfully granted" -ForegroundColor Green
+        }
+    }
+    else
+    {
+        Write-Host "  Status: Failed" -ForegroundColor Red
+    }
+}
+else
+{
+    Write-Host "`n`n[Step 5] Skipping GitHub Roles (AddGithubRoles flag not set)" -ForegroundColor Yellow
+}
+#endregion
+
 #region Final Summary
 Write-Host "`n`n================================================================" -ForegroundColor Cyan
 Write-Host "Final Summary" -ForegroundColor Cyan
@@ -696,6 +737,13 @@ if (-not $SkipEventGridPermissions -and -not [string]::IsNullOrEmpty($EventGridT
     Write-Host "`nEventGrid Permissions:" -ForegroundColor Cyan
     Write-Host "  Resource: $EventGridTopicName" -ForegroundColor Gray
     Write-Host "  Role: EventGrid Data Sender" -ForegroundColor Gray
+}
+
+if ($AddGithubRoles)
+{
+    Write-Host "`nGitHub Roles:" -ForegroundColor Cyan
+    Write-Host "  Resource: $FunctionAppName" -ForegroundColor Gray
+    Write-Host "  Role: Website Contributor" -ForegroundColor Gray
 }
 
 Write-Host "`nNext Steps:" -ForegroundColor Yellow
