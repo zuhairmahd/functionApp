@@ -47,9 +47,9 @@ param(
     [Parameter()]
     [string]$subscriptionId = "8a89e116-824d-4eeb-8ef4-16dcc1f0959b",
     [Parameter()]
-    [string]$resourceGroup = "groupchangefunction",
+    [string]$resourceGroup = "groupFunctionApp",
     [Parameter()]
-    [string]$partnerTopic = "groupchangefunctiontopic",
+    [string]$partnerTopic = "groupFunctionPartnerAppTopic",
     [Parameter()]
     [string]$location = "centralus",
     [Parameter()]

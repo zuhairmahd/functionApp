@@ -130,11 +130,11 @@
 [CmdletBinding()]
 param(
     [string]$graphSubscriptionId = "",
-    [string]$topicName = "groupchangefunctiontopic",
+    [string]$topicName = "groupFunctionPartnerAppTopic",
     [string]$subscriptionId = "8a89e116-824d-4eeb-8ef4-16dcc1f0959b",
-    [string]$functionAppName = "groupchangefunction",
-    [string]$resourceGroupName = "groupchangefunction",
-    [string]$storageAccountName = "groupchangefunction1",
+    [string]$functionAppName = "groupChangeFunctionApp",
+    [string]$resourceGroupName = "groupFunctionApp",
+    [string]$storageAccountName = "groupchangefunctionapp",
     [int]$eventTimeDays = 1,
     [switch]$SkipPermissionChecks
 )
@@ -223,10 +223,9 @@ function Test-ResourceGroupExists()
     {
         $result = az group exists `
             --subscription $SubscriptionId `
-            --name $ResourceGroupName `
-            --query value -o tsv
+            --name $ResourceGroupName
 
-        return $result -eq "true"
+        return ($result.Trim() -eq "true")
     }
     catch
     {
@@ -281,7 +280,6 @@ function Get-FunctionAppSettings()
             --resource-group $ResourceGroupName `
             --subscription $SubscriptionId `
             -o json 2>&1
-
         if ($LASTEXITCODE -ne 0)
         {
             return $null
@@ -438,7 +436,40 @@ if (-not [string]::IsNullOrEmpty($graphSubscriptionId))
 }
 else
 {
-    Write-Host "No subscription ID provided. Searching for EventGrid-based subscriptions..." -ForegroundColor Cyan
+    Write-Host "No subscription ID provided." -ForegroundColor Cyan
+
+    # Check for subscription-info.json in project root before auto-detecting
+    $projectRoot = Split-Path -Parent $PSScriptRoot
+    $subscriptionInfoPath = Join-Path $projectRoot "subscription-info.json"
+
+    if (Test-Path $subscriptionInfoPath)
+    {
+        try
+        {
+            $subscriptionInfo = Get-Content $subscriptionInfoPath -Raw | ConvertFrom-Json
+            if ($subscriptionInfo.SubscriptionId)
+            {
+                Write-Host "Found subscription-info.json file" -ForegroundColor Cyan
+                Write-Host "Attempting to use subscription ID from file: $($subscriptionInfo.SubscriptionId)" -ForegroundColor Cyan
+
+                $foundSub = Get-MgSubscription -SubscriptionId $subscriptionInfo.SubscriptionId
+                if ($foundSub)
+                {
+                    $graphSubs += $foundSub
+                    Write-Host "Successfully loaded subscription from subscription-info.json" -ForegroundColor Green
+                }
+            }
+        }
+        catch
+        {
+            Write-Host "Failed to load subscription from subscription-info.json: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+
+    if ($graphSubs.Count -eq 0)
+    {
+        Write-Host "Searching for EventGrid-based subscriptions..." -ForegroundColor Cyan
+    }
 }
 
 # If we don't have subscriptions yet, search for valid ones
@@ -464,7 +495,6 @@ Write-Host ""
 # Validate prerequisites before checking each subscription
 Write-Host "0. Validating prerequisites..." -ForegroundColor Yellow
 $rgExists = Test-ResourceGroupExists -SubscriptionId $subscriptionId -ResourceGroupName $resourceGroupName
-
 if (-not $rgExists)
 {
     Write-Host "ERROR: Resource Group not found" -ForegroundColor Red
@@ -508,13 +538,15 @@ if (-not $SkipPermissionChecks -and $rgExists)
         $userPrincipalId = $null
         if ($identityType -eq "UserAssigned")
         {
-            $userAssignedIdentities = $identityConfig.userAssignedIdentities.PSObject.Properties
+            $userAssignedIdentities = @($identityConfig.userAssignedIdentities.PSObject.Properties)
             if ($userAssignedIdentities.Count -gt 0)
             {
                 $firstIdentity = $userAssignedIdentities[0].Value
+                $identityResourceId = $userAssignedIdentities[0].Name
                 $principalId = $firstIdentity.principalId
                 $clientId = $firstIdentity.clientId
                 Write-Host "Identity Type: User-Assigned Managed Identity" -ForegroundColor Cyan
+                Write-Host "  Identity Resource: $identityResourceId" -ForegroundColor Gray
                 Write-Host "  Principal ID: $principalId" -ForegroundColor Gray
                 Write-Host "  Client ID: $clientId" -ForegroundColor Gray
             }
@@ -528,7 +560,7 @@ if (-not $SkipPermissionChecks -and $rgExists)
             if ($identityType -eq "SystemAssigned, UserAssigned")
             {
                 Write-Host "  Note: Function also has User-Assigned identity configured" -ForegroundColor Yellow
-                $userAssignedIdentities = $identityConfig.userAssignedIdentities.PSObject.Properties
+                $userAssignedIdentities = @($identityConfig.userAssignedIdentities.PSObject.Properties)
                 if ($userAssignedIdentities.Count -gt 0)
                 {
                     $firstIdentity = $userAssignedIdentities[0].Value
@@ -597,14 +629,12 @@ if (-not $SkipPermissionChecks -and $rgExists)
                 "Storage Blob Data Contributor"  = "ba92f5b4-2d11-453d-a403-e96b0029c9fe"
                 "Storage Table Data Contributor" = "0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3"
             }
-
             $foundRoles = @()
             foreach ($role in $storageRoles)
             {
                 $roleName = $role.roleDefinitionName
                 $foundRoles += $roleName
             }
-
             foreach ($roleName in $requiredStorageRoles.Keys)
             {
                 if ($foundRoles -contains $roleName)
@@ -644,35 +674,88 @@ if (-not $SkipPermissionChecks -and $rgExists)
                 {
                     Write-Host "  Application Insights Configured: Yes" -ForegroundColor Green
                     Write-Host "  Instrumentation Key: $($instrumentationKey.Substring(0, 8))..." -ForegroundColor Gray
-                    # Try to find the Application Insights resource
-                    $appInsightsResources = az monitor app-insights component list `
-                        --subscription $subscriptionId `
-                        --query "[?instrumentationKey=='$instrumentationKey'].{name:name, id:id}" `
-                        -o json 2>&1
-                    if ($LASTEXITCODE -eq 0)
+                    # Extract ApplicationId if present in connection string
+                    $applicationId = $null
+                    if ($appInsightsConnectionString -match "ApplicationId=([^;]+)")
                     {
-                        $appInsights = ($appInsightsResources | ConvertFrom-Json)
-                        if ($appInsights -and $appInsights.Count -gt 0)
+                        $applicationId = $Matches[1]
+                        Write-Host "  Application ID: $applicationId" -ForegroundColor Gray
+                    }
+                    # Try to find the Application Insights resource
+                    # First try: look in the same resource group as the function app
+                    $appInsights = $null
+                    $appInsightsResources = az resource list `
+                        --subscription $subscriptionId `
+                        --resource-group $resourceGroupName `
+                        --resource-type "Microsoft.Insights/components" `
+                        -o json 2>&1
+                    if ($LASTEXITCODE -eq 0 -and $appInsightsResources -and $appInsightsResources -ne "[]")
+                    {
+                        try
                         {
-                            $appInsightsId = $appInsights[0].id
-                            Write-Host "  Application Insights Name: $($appInsights[0].name)" -ForegroundColor Gray
-                            # Check role assignments for Application Insights
-                            $appInsightsRoles = Get-RoleAssignments -PrincipalId $principalId -Scope $appInsightsId -SubscriptionId $subscriptionId
-                            $hasMonitoringPublisher = $appInsightsRoles | Where-Object { $_.roleDefinitionName -eq "Monitoring Metrics Publisher" }
-                            if ($hasMonitoringPublisher)
+                            $componentsInRG = $appInsightsResources | ConvertFrom-Json
+                            # Try to match by ApplicationId if available
+                            if ($applicationId -and $componentsInRG.Count -gt 0)
                             {
-                                Write-Host "Monitoring Metrics Publisher role assigned" -ForegroundColor Green
+                                foreach ($component in $componentsInRG)
+                                {
+                                    $detailsJson = az resource show --ids $component.id -o json 2>&1
+                                    if ($LASTEXITCODE -eq 0)
+                                    {
+                                        $details = $detailsJson | ConvertFrom-Json
+                                        if ($details.properties.AppId -eq $applicationId)
+                                        {
+                                            $appInsights = $details
+                                            break
+                                        }
+                                    }
+                                }
+                            }
+                            # If no match yet and only one component in RG, use it
+                            if (-not $appInsights -and $componentsInRG.Count -eq 1)
+                            {
+                                $detailsJson = az resource show --ids $componentsInRG[0].id -o json 2>&1
+                                if ($LASTEXITCODE -eq 0)
+                                {
+                                    $appInsights = $detailsJson | ConvertFrom-Json
+                                }
+                            }
+                            if ($appInsights)
+                            {
+                                $appInsightsId = $appInsights.id
+                                Write-Host "  Application Insights Name: $($appInsights.name)" -ForegroundColor Gray
+                                Write-Host "  Resource Group: $resourceGroupName" -ForegroundColor Gray
+
+                                # Check role assignments for Application Insights
+                                $appInsightsRoles = Get-RoleAssignments -PrincipalId $principalId -Scope $appInsightsId -SubscriptionId $subscriptionId
+                                $hasMonitoringPublisher = $appInsightsRoles | Where-Object { $_.roleDefinitionName -eq "Monitoring Metrics Publisher" }
+                                if ($hasMonitoringPublisher)
+                                {
+                                    Write-Host "  Monitoring Metrics Publisher role: Assigned" -ForegroundColor Green
+                                }
+                                else
+                                {
+                                    Write-Host "  Monitoring Metrics Publisher role: NOT assigned" -ForegroundColor Yellow
+                                    Write-Host "    Note: Function may still work with connection string auth" -ForegroundColor Gray
+                                }
                             }
                             else
                             {
-                                Write-Host "Monitoring Metrics Publisher role NOT assigned" -ForegroundColor Yellow
-                                Write-Host "    Note: Function may still work with connection string auth" -ForegroundColor Gray
+                                Write-Host "  Application Insights resource not found in resource group" -ForegroundColor Yellow
+                                Write-Host "    Note: Function will use connection string for authentication" -ForegroundColor Gray
                             }
+                        }
+                        catch
+                        {
+                            Write-Host "  Could not retrieve Application Insights details" -ForegroundColor Yellow
+                            Write-Host "    Error: $($_.Exception.Message)" -ForegroundColor Gray
+                            Write-Host "    Function will use connection string for authentication" -ForegroundColor Gray
                         }
                     }
                     else
                     {
-                        Write-Host "Could not retrieve Application Insights resource details" -ForegroundColor Yellow
+                        Write-Host "  Application Insights not found in resource group: $resourceGroupName" -ForegroundColor Yellow
+                        Write-Host "    Function will use connection string for authentication" -ForegroundColor Gray
                     }
                 }
                 elseif (-not $appInsightsConnectionString -match "IngestionEndpoint")
@@ -750,7 +833,6 @@ foreach ($graphSub in $graphSubs)
     Write-Host "===============================================" -ForegroundColor Cyan
     Write-Host "Examining Graph Subscription: $($graphSub.Id)" -ForegroundColor Yellow
     Write-Host "===============================================" -ForegroundColor Cyan
-
     Write-Host "2. Graph Subscription Details" -ForegroundColor Yellow
     Write-Host "  Resource: $($graphSub.Resource)" -ForegroundColor Gray
     Write-Host "  Notification URL: $($graphSub.NotificationUrl)" -ForegroundColor Gray
@@ -763,7 +845,6 @@ foreach ($graphSub in $graphSubs)
 
     # 3. Check EventGrid Partner Topic
     Write-Host "3. Checking EventGrid Partner Topic..." -ForegroundColor Yellow
-
     if (-not $rgExists)
     {
         Write-Host "SKIPPED: Cannot check partner topic - Resource Group not found" -ForegroundColor Yellow
@@ -778,9 +859,7 @@ foreach ($graphSub in $graphSubs)
                 --name $topicName `
                 --resource-group $resourceGroupName `
                 --subscription $subscriptionId `
-                --query "{activationState:properties.activationState, provisioningState:properties.provisioningState}" `
                 -o json 2>&1
-
             if ($LASTEXITCODE -ne 0)
             {
                 Write-Host "ERROR: Failed to retrieve partner topic" -ForegroundColor Red
@@ -796,7 +875,7 @@ foreach ($graphSub in $graphSubs)
             else
             {
                 $partnerTopic = $partnerTopic | ConvertFrom-Json
-
+                Write-Host "  Provisioning State: $($partnerTopic.provisioningState)" -ForegroundColor Gray
                 if ($partnerTopic.activationState -eq "Activated")
                 {
                     Write-Host "Partner Topic is Activated" -ForegroundColor Green
@@ -817,7 +896,6 @@ foreach ($graphSub in $graphSubs)
 
     # 4. Check Event Subscription
     Write-Host "4. Checking Event Subscription..." -ForegroundColor Yellow
-
     if (-not $rgExists)
     {
         Write-Host "SKIPPED: Cannot check event subscription - Resource Group not found" -ForegroundColor Yellow
@@ -828,46 +906,99 @@ foreach ($graphSub in $graphSubs)
     {
         try
         {
-            $eventSubUri = "/subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.EventGrid/partnerTopics/$topicName/eventSubscriptions/$functionAppName`?api-version=2022-06-15"
-
-            $eventSubResponse = az rest --method GET `
-                --uri $eventSubUri `
+            # First, list all event subscriptions on the topic to discover what's available
+            $eventSubListResponse = az eventgrid partner topic event-subscription list `
+                --resource-group $resourceGroupName `
+                --partner-topic-name $topicName `
                 --subscription $subscriptionId `
                 -o json 2>&1
-
             if ($LASTEXITCODE -ne 0)
             {
-                Write-Host "ERROR: Failed to retrieve event subscription" -ForegroundColor Red
-                Write-Host "  Function App Name: $functionAppName" -ForegroundColor Gray
+                Write-Host "ERROR: Failed to list event subscriptions" -ForegroundColor Red
                 Write-Host "  Topic Name: $topicName" -ForegroundColor Gray
                 Write-Host "  Resource Group: $resourceGroupName" -ForegroundColor Gray
-                Write-Host "  Details: $eventSubResponse" -ForegroundColor Gray
+                Write-Host "  Details: $eventSubListResponse" -ForegroundColor Gray
                 Write-Host ""
-                Write-Host "Please verify:" -ForegroundColor Yellow
-                Write-Host "  1. Function App name is correct: $functionAppName" -ForegroundColor Gray
-                Write-Host "  2. Event subscription exists for this function" -ForegroundColor Gray
-                Write-Host "  3. List event subscriptions: az eventgrid partner topic event-subscription list --resource-group $resourceGroupName --topic-name $topicName" -ForegroundColor Cyan
             }
             else
             {
-                $eventSub = $eventSubResponse | ConvertFrom-Json
-
-                if ($eventSub -and $eventSub.properties)
+                $eventSubList = $eventSubListResponse | ConvertFrom-Json
+                if ($eventSubList -and $eventSubList.Count -gt 0)
                 {
-                    Write-Host "  Provisioning State: $($eventSub.properties.provisioningState)" -ForegroundColor Gray
-
-                    if ($eventSub.properties.filter -and $eventSub.properties.filter.advancedFilters -and $eventSub.properties.filter.advancedFilters.Count -gt 0)
+                    Write-Host "Found $($eventSubList.Count) event subscription(s) on this topic:" -ForegroundColor Cyan
+                    # Try to find the best matching subscription
+                    $targetEventSub = $null
+                    # First try: exact function app name match
+                    $targetEventSub = $eventSubList | Where-Object { $_.name -eq $functionAppName } | Select-Object -First 1
+                    # Second try: name contains function app name
+                    if (-not $targetEventSub)
                     {
-                        Write-Host "  Advanced Filter: $($eventSub.properties.filter.advancedFilters[0].key) $($eventSub.properties.filter.advancedFilters[0].operatorType)" -ForegroundColor Gray
+                        $targetEventSub = $eventSubList | Where-Object { $_.name -like "*$functionAppName*" } | Select-Object -First 1
                     }
-                    else
+                    # Third try: just use the first one
+                    if (-not $targetEventSub)
                     {
-                        Write-Host "  Advanced Filter: None configured" -ForegroundColor Gray
+                        $targetEventSub = $eventSubList | Select-Object -First 1
+                    }
+                    # Display all subscriptions
+                    foreach ($sub in $eventSubList)
+                    {
+                        $marker = if ($sub.name -eq $targetEventSub.name)
+                        {
+                            "→ "
+                        }
+                        else
+                        {
+                            "  "
+                        }
+                        Write-Host "$marker$($sub.name)" -ForegroundColor Gray
+                    }
+                    Write-Host ""
+                    # Get details for the target subscription
+                    if ($targetEventSub)
+                    {
+                        Write-Host "Examining event subscription: $($targetEventSub.name)" -ForegroundColor Cyan
+                        # Get full details via REST API
+                        $eventSubUri = "/subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.EventGrid/partnerTopics/$topicName/eventSubscriptions/$($targetEventSub.name)?api-version=2022-06-15"
+                        $eventSubResponse = az rest --method GET `
+                            --uri $eventSubUri `
+                            --subscription $subscriptionId `
+                            -o json 2>&1
+                        if ($LASTEXITCODE -eq 0)
+                        {
+                            $eventSub = $eventSubResponse | ConvertFrom-Json
+                            if ($eventSub -and $eventSub.properties)
+                            {
+                                Write-Host "  Provisioning State: $($eventSub.properties.provisioningState)" -ForegroundColor Gray
+                                Write-Host "  Destination Type: $($eventSub.properties.destination.endpointType)" -ForegroundColor Gray
+                                if ($eventSub.properties.destination.properties.resourceId)
+                                {
+                                    Write-Host "  Destination: $($eventSub.properties.destination.properties.resourceId)" -ForegroundColor Gray
+                                }
+                                if ($eventSub.properties.filter -and $eventSub.properties.filter.advancedFilters -and $eventSub.properties.filter.advancedFilters.Count -gt 0)
+                                {
+                                    Write-Host "  Advanced Filters:" -ForegroundColor Gray
+                                    foreach ($filter in $eventSub.properties.filter.advancedFilters)
+                                    {
+                                        Write-Host "    - $($filter.key) $($filter.operatorType): $($filter.values -join ', ')" -ForegroundColor Gray
+                                    }
+                                }
+                                else
+                                {
+                                    Write-Host "  Advanced Filter: None configured" -ForegroundColor Gray
+                                }
+                            }
+                        }
                     }
                 }
                 else
                 {
-                    Write-Host "ERROR: Event subscription response is empty or malformed" -ForegroundColor Red
+                    Write-Host "No event subscriptions found on this topic" -ForegroundColor Yellow
+                    Write-Host ""
+                    Write-Host "Please verify:" -ForegroundColor Yellow
+                    Write-Host "  1. Topic name is correct: $topicName" -ForegroundColor Gray
+                    Write-Host "  2. Event subscription has been created for this topic" -ForegroundColor Gray
+                    Write-Host "  3. Check topic activation state in step 3 above" -ForegroundColor Gray
                 }
             }
         }
@@ -881,7 +1012,6 @@ foreach ($graphSub in $graphSubs)
 
     # 5. Check EventGrid Metrics
     Write-Host "5. Checking EventGrid Metrics (last $eventTimeDays days)..." -ForegroundColor Yellow
-
     if (-not $rgExists)
     {
         Write-Host "SKIPPED: Cannot check metrics - Resource Group not found" -ForegroundColor Yellow
@@ -893,7 +1023,6 @@ foreach ($graphSub in $graphSubs)
         try
         {
             $startTime = (Get-Date).AddDays(-$eventTimeDays).ToString("yyyy-MM-ddTHH:mm:ssZ")
-
             $metricsResponse = az monitor metrics list `
                 --resource "/subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.EventGrid/partnerTopics/$topicName" `
                 --metric "PublishSuccessCount,MatchedEventCount,UnmatchedEventCount,DeliverySuccessCount,DeliveryAttemptFailCount,DroppedEventCount" `
@@ -901,7 +1030,6 @@ foreach ($graphSub in $graphSubs)
                 --interval PT1H `
                 --aggregation Total `
                 -o json 2>&1
-
             if ($LASTEXITCODE -ne 0)
             {
                 Write-Host "ERROR: Failed to retrieve metrics" -ForegroundColor Red
@@ -916,14 +1044,12 @@ foreach ($graphSub in $graphSubs)
             else
             {
                 $metrics = $metricsResponse | ConvertFrom-Json
-
                 if ($metrics -and $metrics.value)
                 {
                     foreach ($metric in $metrics.value)
                     {
                         $total = ($metric.timeseries.data | Measure-Object -Property total -Sum).Sum
                         $metricName = $metric.name.value
-
                         if ($total -gt 0)
                         {
                             Write-Host "  $metricName`: $total" -ForegroundColor Green
@@ -952,6 +1078,122 @@ foreach ($graphSub in $graphSubs)
 
     # 6. Diagnosis
     Write-Host "6. Diagnosis for this subscription" -ForegroundColor Cyan
+    # First check: Validate integration between Graph subscription and EventGrid resources
+    Write-Host ""
+    Write-Host "6.1 Checking Resource Integration..." -ForegroundColor Yellow
+    $integrationIssues = @()
+    # Parse the NotificationUrl from Graph subscription to extract configuration
+    if ($graphSub.NotificationUrl)
+    {
+        $notificationUrl = $graphSub.NotificationUrl
+        # Extract parameters from the EventGrid URL format
+        # Format: EventGrid:?azuresubscriptionid=XXX&resourcegroup=YYY&partnertopic=ZZZ&location=AAA
+        $urlSubscriptionId = $null
+        $urlResourceGroup = $null
+        $urlPartnerTopic = $null
+        $urlLocation = $null
+        if ($notificationUrl -match "azuresubscriptionid=([^&]+)")
+        {
+            $urlSubscriptionId = $Matches[1]
+        }
+        if ($notificationUrl -match "resourcegroup=([^&]+)")
+        {
+            $urlResourceGroup = $Matches[1]
+        }
+        if ($notificationUrl -match "partnertopic=([^&]+)")
+        {
+            $urlPartnerTopic = $Matches[1]
+        }
+        if ($notificationUrl -match "location=([^&]+)")
+        {
+            $urlLocation = $Matches[1]
+        }
+        # Check if Graph subscription points to our resources
+        if ($urlSubscriptionId -and $urlSubscriptionId -ne $subscriptionId)
+        {
+            $integrationIssues += "Graph subscription points to a different Azure subscription"
+            Write-Host "  [ERROR] Subscription ID Mismatch" -ForegroundColor Red
+            Write-Host "    Expected: $subscriptionId" -ForegroundColor Gray
+            Write-Host "    In Graph: $urlSubscriptionId" -ForegroundColor Gray
+        }
+        else
+        {
+            Write-Host "  [OK] Subscription ID matches" -ForegroundColor Green
+        }
+        if ($urlResourceGroup -and $urlResourceGroup -ne $resourceGroupName)
+        {
+            $integrationIssues += "Graph subscription points to a different resource group"
+            Write-Host "  [ERROR] Resource Group Mismatch" -ForegroundColor Red
+            Write-Host "    Expected: $resourceGroupName" -ForegroundColor Gray
+            Write-Host "    In Graph: $urlResourceGroup" -ForegroundColor Gray
+        }
+        else
+        {
+            Write-Host "  [OK] Resource Group matches" -ForegroundColor Green
+        }
+        if ($urlPartnerTopic -and $urlPartnerTopic -ne $topicName)
+        {
+            $integrationIssues += "Graph subscription points to a different partner topic"
+            Write-Host "  [ERROR] Partner Topic Mismatch" -ForegroundColor Red
+            Write-Host "    Expected: $topicName" -ForegroundColor Gray
+            Write-Host "    In Graph: $urlPartnerTopic" -ForegroundColor Gray
+        }
+        else
+        {
+            Write-Host "  [OK] Partner Topic matches" -ForegroundColor Green
+        }
+    }
+
+    # Check if event subscription points to our function
+    if ($targetEventSub -and $targetEventSub.properties.destination)
+    {
+        $destination = $targetEventSub.properties.destination
+        if ($destination.properties.resourceId)
+        {
+            $destResourceId = $destination.properties.resourceId
+            # Expected format: /subscriptions/XXX/resourceGroups/YYY/providers/Microsoft.Web/sites/ZZZ/functions/AAA
+            $expectedFunctionPath = "/subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.Web/sites/$functionAppName"
+            if ($destResourceId -like "$expectedFunctionPath*")
+            {
+                Write-Host "  [OK] Event subscription points to function app: $functionAppName" -ForegroundColor Green
+                # Extract the function name from the destination
+                if ($destResourceId -match "/functions/([^/]+)$")
+                {
+                    $actualFunctionName = $Matches[1]
+                    Write-Host "    Function: $actualFunctionName" -ForegroundColor Gray
+                }
+            }
+            else
+            {
+                $integrationIssues += "Event subscription points to a different function app"
+                Write-Host "  [ERROR] Event subscription destination mismatch" -ForegroundColor Red
+                Write-Host "    Expected function app: $functionAppName" -ForegroundColor Gray
+                Write-Host "    Actual destination: $destResourceId" -ForegroundColor Gray
+            }
+        }
+    }
+
+    if ($integrationIssues.Count -gt 0)
+    {
+        Write-Host ""
+        Write-Host "INTEGRATION ISSUES DETECTED:" -ForegroundColor Red
+        foreach ($issue in $integrationIssues)
+        {
+            Write-Host "  - $issue" -ForegroundColor Yellow
+        }
+        Write-Host ""
+        Write-Host "Action Required:" -ForegroundColor Yellow
+        Write-Host "  The Graph subscription and EventGrid resources are not properly integrated." -ForegroundColor Gray
+        Write-Host "  You may need to recreate the Graph subscription with correct parameters." -ForegroundColor Gray
+        Write-Host "  Use: .\tools\create-api-subscription-topic.ps1" -ForegroundColor Cyan
+    }
+    else
+    {
+        Write-Host "  [OK] All resources are properly integrated" -ForegroundColor Green
+    }
+
+    Write-Host ""
+    Write-Host "6.2 Checking Event Delivery..." -ForegroundColor Yellow
 
     if (-not $rgExists)
     {
