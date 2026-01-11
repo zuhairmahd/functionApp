@@ -10,19 +10,108 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: '.' # set this to the path to your web app project, defaults to the repository root
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: "." # set this to the path to your web app project, defaults to the repository root
 
 jobs:
+  test-unit:
+    name: Unit Tests (pwsh on Windows)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify PowerShell 7
+        shell: pwsh
+        run: |
+          Write-Host "Using PowerShell version: $($PSVersionTable.PSVersion)"
+          if ($PSVersionTable.PSVersion.Major -lt 7) { Write-Error "PowerShell 7+ is required."; exit 1 }
+
+      - name: Cache Pester module
+        uses: actions/cache@v4
+        with:
+          path: ~\Documents\PowerShell\Modules\Pester
+          key: ${{ runner.os }}-pester-${{ hashFiles('**/Invoke-PesterTests.ps1') }}
+          restore-keys: |
+            ${{ runner.os }}-pester-
+
+      - name: cache PSScriptAnalyzer
+        uses: actions/cache@v4
+        with:
+          path: ~\Documents\PowerShell\Modules\PSScriptAnalyzer
+          key: ${{ runner.os }}-psscriptanalyzer-${{ hashFiles('**/Invoke-PesterTests.ps1') }}
+          restore-keys: |
+            ${{ runner.os }}-psscriptanalyzer-
+
+      - name: Install Pester
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name Pester -MinimumVersion 5.0.0 -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name PSScriptAnalyzer -MinimumVersion 1.18.0 -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: Run Unit Tests
+        shell: pwsh
+        run: |
+          .\Invoke-PesterTests.ps1 -TestType Unit -CI -OutputVerbosity Detailed
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: |
+            TestResults*.xml
+            coverage.xml
+          retention-days: 30
+
+      - name: Publish Unit Test Results
+        uses: EnricoMi/publish-unit-test-result-action/windows@v2
+        if: always()
+        with:
+          files: TestResults*.xml
+          check_name: Unit Test Results
+          comment_mode: off
+
+  summary:
+    name: Test Summary
+    runs-on: windows-latest
+    needs: [test-unit]
+    if: always()
+    steps:
+      - name: Check test results
+        shell: pwsh
+        run: |
+          $unitResult = '${{ needs.test-unit.result }}'
+
+          Write-Host "Test Results Summary:" -ForegroundColor Cyan
+          Write-Host "  Unit Tests: $unitResult" -ForegroundColor $(if ($unitResult -eq 'success') { 'Green' } else { 'Red' })
+
+          if ($unitResult -ne 'success') {
+            Write-Error "One or more checks failed. Please review the results above."
+            exit 1
+          }
+          else {
+            Write-Host "`nAll checks passed! ✓" -ForegroundColor Green
+          }
+
   deploy:
     runs-on: ubuntu-latest
+    needs: [test-unit, summary]
+    if: github.ref == 'refs/heads/deployment'
     permissions:
       id-token: write #This is required for requesting the JWT
       contents: read #This is required for actions/checkout
 
     steps:
-      - name: 'Checkout GitHub Action'
+      - name: "Checkout GitHub Action"
         uses: actions/checkout@v4
-      
+
       - name: Login to Azure
         uses: azure/login@v2
         with:
@@ -30,11 +119,10 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_24909C316BFC4F6382A70AF94273EB70 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_3B2FAD41D3104C15A941ABEA54388A2C }}
 
-      - name: 'Run Azure Functions Action'
+      - name: "Run Azure Functions Action"
         uses: Azure/functions-action@v1
         id: fa
         with:
-          app-name: 'groupChangeFunctionApp'
-          slot-name: 'Production'
+          app-name: "groupChangeFunctionApp"
+          slot-name: "Production"
           package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          
