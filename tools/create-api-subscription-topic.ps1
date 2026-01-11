@@ -41,22 +41,25 @@ param(
     [Parameter()]
     [switch]$UseServicePrincipal,
     [Parameter()]
-    [string]$ClientId = "0ed597a6-5cca-4c6f-b51e-10510010e936",
+    [string]$ClientId,
     [Parameter()]
-    [string]$TenantId
+    [string]$TenantId,
+    [Parameter()]
+    [string]$subscriptionId = "8a89e116-824d-4eeb-8ef4-16dcc1f0959b",
+    [Parameter()]
+    [string]$resourceGroup = "groupchangefunction",
+    [Parameter()]
+    [string]$partnerTopic = "groupchangefunctiontopic",
+    [Parameter()]
+    [string]$location = "centralus",
+    [Parameter()]
+    [int]$expirationMinutes = 4230
 )
 
 Import-Module Microsoft.Graph.ChangeNotifications
 Import-Module Microsoft.Graph.Authentication
 
-# Azure and EventGrid configuration
-$subscriptionId = "8a89e116-824d-4eeb-8ef4-16dcc1f0959b"
-$resourceGroup = "groupchangefunction"
-$partnerTopic = "groupchangefunctiontopic"
-$location = "centralus"
-
-# Set expiration to maximum allowed (4230 minutes = ~3 days)
-$expirationMinutes = 4230
+# Set expiration to the passed value, or to the default maximum allowed (4230 minutes = ~3 days)
 $expirationDate = (Get-Date).AddMinutes($expirationMinutes)
 
 # Authenticate to Microsoft Graph
@@ -64,12 +67,12 @@ if ($UseServicePrincipal)
 {
     if (-not $TenantId)
     {
-        Write-Host "❌ TenantId is required when using -UseServicePrincipal" -ForegroundColor Red
+        Write-Host "TenantId is required when using -UseServicePrincipal" -ForegroundColor Red
         Write-Host "Get your tenant ID from: https://portal.azure.com -> Entra ID -> Overview" -ForegroundColor Yellow
         exit 1
     }
 
-    Write-Host "⚠️  SERVICE PRINCIPAL AUTHENTICATION" -ForegroundColor Yellow
+    Write-Host "Warning: SERVICE PRINCIPAL AUTHENTICATION" -ForegroundColor Yellow
     Write-Host "Managed identities cannot authenticate from local machines." -ForegroundColor Yellow
     Write-Host "You need to create an App Registration with certificate or secret authentication." -ForegroundColor Yellow
     Write-Host "`nAlternative: Run this command from Azure Cloud Shell or an Azure VM where the" -ForegroundColor Yellow
@@ -84,7 +87,7 @@ else
     {
         Write-Host "Not connected to Microsoft Graph." -ForegroundColor Yellow
         Write-Host "Connecting with user authentication (delegated permissions)..." -ForegroundColor Cyan
-        Write-Host "`n⚠️  WARNING: This will create a subscription under YOUR account," -ForegroundColor Yellow
+        Write-Host "`nWARNING: This will create a subscription under YOUR account," -ForegroundColor Yellow
         Write-Host "which the Function App's managed identity CANNOT access." -ForegroundColor Yellow
         Write-Host "`nTo create a subscription the Function App can use, you must:" -ForegroundColor Yellow
         Write-Host "  1. Run this from Azure Cloud Shell with the managed identity, OR" -ForegroundColor Yellow
@@ -96,13 +99,12 @@ else
             Write-Host "Cancelled." -ForegroundColor Gray
             exit 0
         }
-
         Connect-MgGraph -Scopes "Group.Read.All" -NoWelcome
     }
     else
     {
-        Write-Host "✅ Connected to Microsoft Graph as: $($context.Account)" -ForegroundColor Green
-        Write-Host "`n⚠️  WARNING: Creating subscription under this account." -ForegroundColor Yellow
+        Write-Host "Connected to Microsoft Graph as: $($context.Account)" -ForegroundColor Green
+        Write-Host "`nWARNING: Creating subscription under this account." -ForegroundColor Yellow
         Write-Host "The Function App's managed identity will NOT be able to renew this subscription." -ForegroundColor Yellow
     }
 }

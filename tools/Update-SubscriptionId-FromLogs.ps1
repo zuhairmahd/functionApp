@@ -23,7 +23,6 @@
 param(
     [Parameter()]
     [string]$FunctionAppName = "groupchangefunction",
-
     [Parameter()]
     [string]$ResourceGroupName = "groupchangefunction"
 )
@@ -37,7 +36,7 @@ Write-Host "============================================`n" -ForegroundColor Cya
 # Check if Az.Functions module is installed
 if (-not (Get-Module -ListAvailable Az.Functions))
 {
-    Write-Host "⚠️  Az.Functions module not installed" -ForegroundColor Yellow
+    Write-Host "Az.Functions module not installed" -ForegroundColor Yellow
     Write-Host "Installing Az.Functions module..." -ForegroundColor Cyan
     Install-Module Az.Functions -Scope CurrentUser -Force -AllowClobber
 }
@@ -53,7 +52,7 @@ if (-not $context)
     Connect-AzAccount
 }
 
-Write-Host "✅ Connected to Azure as: $($context.Account.Id)" -ForegroundColor Green
+Write-Host "Connected to Azure as: $($context.Account.Id)" -ForegroundColor Green
 
 # Query Application Insights for the subscription ID from logs
 Write-Host "`nSearching for newly created subscription ID in logs..." -ForegroundColor Cyan
@@ -62,11 +61,11 @@ Write-Host "`nSearching for newly created subscription ID in logs..." -Foregroun
 $functionApp = Get-AzFunctionApp -ResourceGroupName $ResourceGroupName -Name $FunctionAppName
 if (-not $functionApp)
 {
-    Write-Host "❌ Function App not found: $FunctionAppName" -ForegroundColor Red
+    Write-Host "Function App not found: $FunctionAppName" -ForegroundColor Red
     exit 1
 }
 
-Write-Host "✅ Found Function App: $FunctionAppName" -ForegroundColor Green
+Write-Host "Found Function App: $FunctionAppName" -ForegroundColor Green
 
 # Look in recent traces for the subscription creation log
 Write-Host "Searching recent logs for subscription creation..." -ForegroundColor Cyan
@@ -89,12 +88,12 @@ try
     {
         Write-Host "Querying Application Insights..." -ForegroundColor Gray
         # Query would go here if AI is properly configured
-        Write-Host "⚠️  Application Insights query not implemented in this version" -ForegroundColor Yellow
+        Write-Host "Application Insights query not implemented in this version" -ForegroundColor Yellow
     }
 }
 catch
 {
-    Write-Host "⚠️  Could not query Application Insights: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "Could not query Application Insights: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
 # Manual input as fallback
@@ -105,7 +104,7 @@ $newSubscriptionId = Read-Host "`nSubscription ID"
 
 if (-not $newSubscriptionId -or $newSubscriptionId.Length -ne 36)
 {
-    Write-Host "❌ Invalid subscription ID format. Expected GUID like: 12345678-1234-1234-1234-123456789abc" -ForegroundColor Red
+    Write-Host "Invalid subscription ID format. Expected GUID like: 12345678-1234-1234-1234-123456789abc" -ForegroundColor Red
     exit 1
 }
 
@@ -127,15 +126,15 @@ try
         -AppSetting $settings `
         -Force
 
-    Write-Host "`n✅ Successfully updated GRAPH_SUBSCRIPTION_ID!" -ForegroundColor Green
+    Write-Host "`nSuccessfully updated GRAPH_SUBSCRIPTION_ID!" -ForegroundColor Green
     Write-Host "   The Function App will now use this subscription ID directly" -ForegroundColor Green
     Write-Host "   instead of querying all subscriptions on each run." -ForegroundColor Green
 
-    Write-Host "`n⚠️  Note: Function App will restart to pick up the new setting" -ForegroundColor Yellow
+    Write-Host "`nNote: Function App will restart to pick up the new setting" -ForegroundColor Yellow
 }
 catch
 {
-    Write-Host "`n❌ Failed to update Function App settings: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "`nFailed to update Function App settings: $($_.Exception.Message)" -ForegroundColor Red
     Write-Host "`nManual update:" -ForegroundColor Yellow
     Write-Host "1. Go to Azure Portal" -ForegroundColor White
     Write-Host "2. Navigate to Function App: $FunctionAppName" -ForegroundColor White

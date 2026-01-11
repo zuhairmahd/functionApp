@@ -1,9 +1,38 @@
+<#
+.SYNOPSIS
+    Manually apply or remove the mfabackup device tag for a user's Windows devices in Entra ID.
+
+.DESCRIPTION
+    Retrieves a user's registered devices from Microsoft Graph, filters Windows devices, and sets
+    or clears the `extensionAttribute1` value to the mfabackup tag. Uses delegated Graph auth with
+    User.Read.All and Device.ReadWrite.All scopes for ad-hoc debugging.
+
+.PARAMETER Operation
+    Whether to add or remove the mfabackup tag. Valid values: add, remove. Default: add.
+
+.PARAMETER userId
+    The Entra ID object ID (GUID) of the target user whose devices should be tagged.
+
+.EXAMPLE
+    .\debug-deviceTagging.ps1 -Operation add -userId "<user-object-id>"
+    Adds the mfabackup tag to Windows devices registered to the specified user that are not already tagged.
+
+.EXAMPLE
+    .\debug-deviceTagging.ps1 -Operation remove -userId "<user-object-id>"
+    Removes the mfabackup tag from Windows devices registered to the specified user if present.
+
+.NOTES
+    - Requires Microsoft.Graph.* modules available in the repo and delegated scopes: User.Read.All, Device.ReadWrite.All.
+    - Only Windows devices are modified; other OS types are skipped. Tag value is stored in extensionAttribute1.
+    - Intended for manual debugging; production flows should rely on managed identity automation.
+#>
 [CmdletBinding()]
 param(
-    [ValidateSet("add", "remove")   ]
-    [string]$Operation = "add"
+    [ValidateSet("add", "remove")]
+    [string]$operation = "add",
+    [string]$userId = "c2fb973c-099e-4ab6-bef4-aad5a7b915fc"
 )
-$userId = "c2fb973c-099e-4ab6-bef4-aad5a7b915fc"
+
 $tagToApply = 'mfabackup'
 try
 {
@@ -16,7 +45,7 @@ try
     }
     else
     {
-        Write-Host "✅ Already connected to Microsoft Graph as: $($context.Account)" -ForegroundColor Green
+        Write-Host "Already connected to Microsoft Graph as: $($context.Account)" -ForegroundColor Green
     }
     Write-Host "Successfully connected to Microsoft Graph" -ForegroundColor Green
 
@@ -130,7 +159,6 @@ try
                 Write-Error " Failed to $failureAction $($device.additionalProperties.displayName)"
                 $failureCount++
             }
-
         }
 
         $operationSummary = if ($operation -eq 'remove')

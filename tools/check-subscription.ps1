@@ -18,10 +18,12 @@ Import-Module Microsoft.Graph.ChangeNotifications
 Write-Host "Checking Microsoft Graph subscriptions..." -ForegroundColor Cyan
 Write-Host ""
 
-try {
+try
+{
     # Check if connected to Microsoft Graph
     $context = Get-MgContext
-    if (-not $context) {
+    if (-not $context)
+    {
         Write-Host "Not connected to Microsoft Graph." -ForegroundColor Red
         Write-Host "Please connect first:" -ForegroundColor Yellow
         Write-Host "  Connect-MgGraph -Scopes 'Subscription.Read.All'" -ForegroundColor Yellow
@@ -34,8 +36,11 @@ try {
     # Get all subscriptions
     $subscriptions = Get-MgSubscription -All
 
-    if ($subscriptions.Count -eq 0) {
+    if ($subscriptions.Count -eq 0)
+    {
         Write-Host "No active subscriptions found." -ForegroundColor Yellow
+        Write-Host "Note that if the subscription was created by a different owner, it won't be visible here." -ForegroundColor Yellow
+        Write-Host "You must run this script as the same user or managed identity that created the subscription." -ForegroundColor Yellow
         Write-Host "Run .\create-api-subscription-topic.ps1 to create a subscription." -ForegroundColor Yellow
         return
     }
@@ -43,7 +48,8 @@ try {
     Write-Host "Found $($subscriptions.Count) subscription(s):" -ForegroundColor Green
     Write-Host ""
 
-    foreach ($sub in $subscriptions) {
+    foreach ($sub in $subscriptions)
+    {
         $expirationDateTime = [DateTime]::Parse($sub.ExpirationDateTime)
         $hoursUntilExpiration = ($expirationDateTime - (Get-Date)).TotalHours
 
@@ -53,17 +59,20 @@ try {
         Write-Host "  Notification URL: $($sub.NotificationUrl)"
         Write-Host "  Expiration: $expirationDateTime" -NoNewline
 
-        if ($hoursUntilExpiration -lt 0) {
+        if ($hoursUntilExpiration -lt 0)
+        {
             Write-Host " [EXPIRED]" -ForegroundColor Red
-            Write-Host "  ❌ This subscription has expired and needs to be recreated!" -ForegroundColor Red
+            Write-Host "This subscription has expired and needs to be recreated!" -ForegroundColor Red
         }
-        elseif ($hoursUntilExpiration -lt 24) {
+        elseif ($hoursUntilExpiration -lt 24)
+        {
             Write-Host " [EXPIRES SOON]" -ForegroundColor Yellow
-            Write-Host "  ⚠️  Expires in $([Math]::Round($hoursUntilExpiration, 1)) hours - renewal recommended!" -ForegroundColor Yellow
+            Write-Host "Expires in $([Math]::Round($hoursUntilExpiration, 1)) hours - renewal recommended!" -ForegroundColor Yellow
         }
-        else {
+        else
+        {
             Write-Host " [ACTIVE]" -ForegroundColor Green
-            Write-Host "  ✅ Expires in $([Math]::Round($hoursUntilExpiration, 1)) hours" -ForegroundColor Green
+            Write-Host "Expires in $([Math]::Round($hoursUntilExpiration, 1)) hours" -ForegroundColor Green
         }
 
         Write-Host ""
@@ -72,15 +81,18 @@ try {
     # Check for EventGrid subscriptions specifically
     $eventGridSubs = $subscriptions | Where-Object { $_.NotificationUrl -like "*EventGrid*" }
 
-    if ($eventGridSubs.Count -eq 0) {
-        Write-Host "⚠️  Warning: No subscriptions found using EventGrid" -ForegroundColor Yellow
+    if ($eventGridSubs.Count -eq 0)
+    {
+        Write-Host "Warning: No subscriptions found using EventGrid" -ForegroundColor Yellow
         Write-Host "Your function app may not receive notifications." -ForegroundColor Yellow
     }
-    else {
-        Write-Host "✅ Found $($eventGridSubs.Count) EventGrid subscription(s)" -ForegroundColor Green
+    else
+    {
+        Write-Host "Found $($eventGridSubs.Count) EventGrid subscription(s)" -ForegroundColor Green
     }
 }
-catch {
+catch
+{
     Write-Host "Error checking subscriptions:" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
     Write-Host ""
