@@ -1210,8 +1210,182 @@ foreach ($graphSub in $graphSubs)
     }
     else
     {
+        # Check Application Insights for actual function executions
+        Write-Host ""
+        Write-Host "6.2.1 Checking Application Insights for Function Executions..." -ForegroundColor Yellow
+        try
+        {
+            # Get Application Insights workspace ID from the function app
+            $appInsightsQuery = az monitor app-insights component show `
+                --app $functionAppName `
+                --resource-group $resourceGroupName `
+                --subscription $subscriptionId `
+                -o json 2>&1
+
+            if ($LASTEXITCODE -eq 0)
+            {
+                $appInsights = $appInsightsQuery | ConvertFrom-Json
+                $appId = $appInsights.appId
+
+                Write-Host "  App ID: $appId" -ForegroundColor Gray
+                Write-Host "  Querying Application Insights..." -ForegroundColor Gray
+
+                # Query for function executions - use separate queries for each table since union doesn't preserve itemType
+                # First, get request counts (function invocations)
+                $requestsQuery = @"
+requests
+| where timestamp > ago($($eventTimeDays)d)
+| summarize
+    TotalExecutions = count(),
+    SuccessfulExecutions = countif(success == true),
+    FailedExecutions = countif(success == false),
+    LatestExecution = max(timestamp)
+| extend SuccessRate = round(100.0 * SuccessfulExecutions / nullif(TotalExecutions, 0), 2)
+"@
+
+                # Second, get trace counts
+                $tracesQuery = @"
+traces
+| where timestamp > ago($($eventTimeDays)d)
+| summarize TotalTraces = count()
+"@
+
+                # Third, get custom event counts
+                $customEventsQuery = @"
+customEvents
+| where timestamp > ago($($eventTimeDays)d)
+| summarize TotalCustomEvents = count()
+"@
+
+                # Execute requests query
+                $requestsResult = az monitor app-insights query `
+                    --app $appId `
+                    --analytics-query $requestsQuery `
+                    -o json 2>&1
+
+                $tracesResult = az monitor app-insights query `
+                    --app $appId `
+                    --analytics-query $tracesQuery `
+                    -o json 2>&1
+
+                $customEventsResult = az monitor app-insights query `
+                    --app $appId `
+                    --analytics-query $customEventsQuery `
+                    -o json 2>&1
+
+                $customEventsResult = az monitor app-insights query `
+                    --app $appId `
+                    --analytics-query $customEventsQuery `
+                    -o json 2>&1
+
+                if ($LASTEXITCODE -eq 0)
+                {
+                    # Parse results from each query
+                    try
+                    {
+                        $requestsJson = $requestsResult | ConvertFrom-Json
+                        $tracesJson = $tracesResult | ConvertFrom-Json
+                        $customEventsJson = $customEventsResult | ConvertFrom-Json
+
+                        $requestsData = if ($requestsJson.tables -and $requestsJson.tables[0].rows.Count -gt 0) { $requestsJson.tables[0].rows[0] } else { $null }
+                        $tracesData = if ($tracesJson.tables -and $tracesJson.tables[0].rows.Count -gt 0) { $tracesJson.tables[0].rows[0] } else { $null }
+                        $customEventsData = if ($customEventsJson.tables -and $customEventsJson.tables[0].rows.Count -gt 0) { $customEventsJson.tables[0].rows[0] } else { $null }
+
+                        if ($requestsData -or $tracesData -or $customEventsData)
+                        {
+                            # Extract values from requests query
+                            $totalExec = if ($requestsData) { $requestsData[0] } else { 0 }
+                            $successExec = if ($requestsData) { $requestsData[1] } else { 0 }
+                            $failedExec = if ($requestsData) { $requestsData[2] } else { 0 }
+                            $latestExec = if ($requestsData) { $requestsData[3] } else { $null }
+                            $successRate = if ($requestsData) { $requestsData[4] } else { 0 }
+
+                            # Extract trace and custom event counts
+                            $totalTraces = if ($tracesData) { $tracesData[0] } else { 0 }
+                            $totalCustomEvents = if ($customEventsData) { $customEventsData[0] } else { 0 }
+
+                            Write-Host "  Application Insights Data (last $eventTimeDays day(s)):" -ForegroundColor Gray
+                            if ($totalExec -gt 0)
+                            {
+                                Write-Host "    Total Function Executions: $totalExec" -ForegroundColor Green
+                                Write-Host "    Successful: $successExec" -ForegroundColor Green
+                                if ($successRate)
+                                {
+                                    Write-Host "    Success Rate: $successRate%" -ForegroundColor Green
+                                }
+                                if ($failedExec -gt 0)
+                                {
+                                    Write-Host "    Failed: $failedExec" -ForegroundColor Red
+                                }
+                                if ($latestExec)
+                                {
+                                    Write-Host "    Latest Execution: $latestExec" -ForegroundColor Gray
+                                }
+                                Write-Host "    Trace Logs: $totalTraces" -ForegroundColor Gray
+                                Write-Host "    Custom Events: $totalCustomEvents" -ForegroundColor Gray
+                            }
+                            else
+                            {
+                                Write-Host "    No function executions (requests) found in Application Insights" -ForegroundColor Yellow
+                                if ($totalTraces -gt 0 -or $totalCustomEvents -gt 0)
+                                {
+                                    Write-Host "    However, found:" -ForegroundColor Yellow
+                                    if ($totalTraces -gt 0)
+                                    {
+                                        Write-Host "      - Trace Logs: $totalTraces" -ForegroundColor Yellow
+                                    }
+                                    if ($totalCustomEvents -gt 0)
+                                    {
+                                        Write-Host "      - Custom Events: $totalCustomEvents" -ForegroundColor Yellow
+                                    }
+                                    Write-Host "    This may indicate:" -ForegroundColor Yellow
+                                    Write-Host "      - Function is logging but requests table is not being populated" -ForegroundColor Gray
+                                    Write-Host "      - Application Insights may have sampling enabled" -ForegroundColor Gray
+                                    Write-Host "      - Check host.json for logging configuration" -ForegroundColor Gray
+                                }
+                                else
+                                {
+                                    Write-Host "    No telemetry data found at all - events are not reaching the function" -ForegroundColor Yellow
+                                }
+                            }
+                        }
+                        else
+                        {
+                            Write-Host "  No Application Insights data available for the specified time range" -ForegroundColor Yellow
+                        }
+                    }
+                    catch
+                    {
+                        Write-Host "  Error parsing Application Insights query results" -ForegroundColor Red
+                        Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Gray
+                    }
+                }
+                else
+                {
+                    Write-Host "  Failed to query Application Insights" -ForegroundColor Yellow
+                    Write-Host "  Error details:" -ForegroundColor Gray
+                    Write-Host "    Requests: $requestsResult" -ForegroundColor Gray
+                    Write-Host "    Traces: $tracesResult" -ForegroundColor Gray
+                    Write-Host "    CustomEvents: $customEventsResult" -ForegroundColor Gray
+                }
+            }
+            else
+            {
+                Write-Host "  Could not retrieve Application Insights component" -ForegroundColor Yellow
+                Write-Host "  Verify Application Insights is configured for the function app" -ForegroundColor Gray
+            }
+        }
+        catch
+        {
+            Write-Host "  Error querying Application Insights: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+        Write-Host ""
+        Write-Host ""
+
+        Write-Host "6.2.2 Comparing EventGrid Metrics with Application Insights..." -ForegroundColor Yellow
         $publishSuccessMetric = $metrics.value | Where-Object { $_.name.value -eq "PublishSuccessCount" }
         $unmatchedEventMetric = $metrics.value | Where-Object { $_.name.value -eq "UnmatchedEventCount" }
+        $deliverySuccessMetric = $metrics.value | Where-Object { $_.name.value -eq "DeliverySuccessCount" }
         $deliveryFailMetric = $metrics.value | Where-Object { $_.name.value -eq "DeliveryAttemptFailCount" }
 
         $publishSuccessTotal = if ($publishSuccessMetric -and $publishSuccessMetric.timeseries.data)
@@ -1230,6 +1404,14 @@ foreach ($graphSub in $graphSubs)
         {
             0
         }
+        $deliverySuccessTotal = if ($deliverySuccessMetric -and $deliverySuccessMetric.timeseries.data)
+        {
+            ($deliverySuccessMetric.timeseries.data | Measure-Object -Property total -Sum).Sum
+        }
+        else
+        {
+            0
+        }
         $deliveryFailTotal = if ($deliveryFailMetric -and $deliveryFailMetric.timeseries.data)
         {
             ($deliveryFailMetric.timeseries.data | Measure-Object -Property total -Sum).Sum
@@ -1239,30 +1421,117 @@ foreach ($graphSub in $graphSubs)
             0
         }
 
+        Write-Host "  EventGrid Metrics (last $eventTimeDays day(s)):" -ForegroundColor Gray
+        Write-Host "    Events Published: $publishSuccessTotal" -ForegroundColor $(if ($publishSuccessTotal -gt 0)
+            {
+                'Green'
+            }
+            else
+            {
+                'Yellow'
+            })
+        Write-Host "    Events Delivered Successfully: $deliverySuccessTotal" -ForegroundColor $(if ($deliverySuccessTotal -gt 0)
+            {
+                'Green'
+            }
+            else
+            {
+                'Yellow'
+            })
+        Write-Host "    Unmatched Events: $unmatchedEventTotal" -ForegroundColor $(if ($unmatchedEventTotal -gt 0)
+            {
+                'Yellow'
+            }
+            else
+            {
+                'Gray'
+            })
+        Write-Host "    Delivery Failures: $deliveryFailTotal" -ForegroundColor $(if ($deliveryFailTotal -gt 0)
+            {
+                'Red'
+            }
+            else
+            {
+                'Gray'
+            })
+        Write-Host ""
+
+        Write-Host "6.2.3 Diagnosis:" -ForegroundColor Yellow
+
         if ($publishSuccessTotal -eq 0)
         {
             Write-Host "NO EVENTS PUBLISHED" -ForegroundColor Red
-            Write-Host "   Microsoft Graph is not sending events to EventGrid." -ForegroundColor Yellow
-            Write-Host "   Possible causes:" -ForegroundColor Yellow
-            Write-Host "   - No group changes have occurred" -ForegroundColor Yellow
-            Write-Host "   - Graph subscription may need to be recreated" -ForegroundColor Yellow
-            Write-Host "   - NotificationUrl mismatch between Graph and EventGrid" -ForegroundColor Yellow
+            Write-Host "      Microsoft Graph is not sending events to EventGrid." -ForegroundColor Yellow
+            Write-Host "      Possible causes:" -ForegroundColor Yellow
+            Write-Host "      - No group changes have occurred" -ForegroundColor Gray
+            Write-Host "      - Graph subscription may need to be recreated" -ForegroundColor Gray
+            Write-Host "      - NotificationUrl mismatch between Graph and EventGrid" -ForegroundColor Gray
+        }
+        elseif ($deliverySuccessTotal -eq 0 -and $unmatchedEventTotal -eq 0)
+        {
+            Write-Host "EVENTS PUBLISHED BUT NOT DELIVERED" -ForegroundColor Yellow
+            Write-Host "      Events are arriving at EventGrid but not being delivered to the function." -ForegroundColor Yellow
+            Write-Host "Check:" -ForegroundColor Yellow
+            Write-Host "      - Event subscription configuration (step 4)" -ForegroundColor Gray
+            Write-Host "      - Advanced filter settings may be rejecting all events" -ForegroundColor Gray
+            Write-Host "      - Function endpoint configuration" -ForegroundColor Gray
         }
         elseif ($unmatchedEventTotal -gt 0)
         {
-            Write-Host "EVENTS PUBLISHED BUT NOT MATCHED" -ForegroundColor Yellow
-            Write-Host "   Events are arriving but the filter is rejecting them." -ForegroundColor Yellow
-            Write-Host "   Check the advanced filter configuration in step 4 above" -ForegroundColor Yellow
+            Write-Host "EVENTS NOT MATCHING FILTERS" -ForegroundColor Yellow
+            Write-Host "      Events are arriving but the filter is rejecting them." -ForegroundColor Yellow
+            Write-Host "      - Published: $publishSuccessTotal | Unmatched: $unmatchedEventTotal" -ForegroundColor Gray
+            Write-Host "      - Check the advanced filter configuration in step 4 above" -ForegroundColor Gray
         }
         elseif ($deliveryFailTotal -gt 0)
         {
             Write-Host "DELIVERY FAILURES" -ForegroundColor Yellow
-            Write-Host "   Events are matched but delivery to function is failing." -ForegroundColor Yellow
+            Write-Host "      Events are matched but delivery to function is failing." -ForegroundColor Yellow
+            Write-Host "      - Delivered: $deliverySuccessTotal | Failed: $deliveryFailTotal" -ForegroundColor Gray
+            Write-Host "      - Check function app health and availability" -ForegroundColor Gray
+            Write-Host "      - Review Application Insights for function errors" -ForegroundColor Gray
+        }
+        elseif ($deliverySuccessTotal -gt 0)
+        {
+            Write-Host "EVENT DELIVERY SUCCESSFUL" -ForegroundColor Green
+            Write-Host "      EventGrid is successfully delivering events to the function." -ForegroundColor Green
+            Write-Host "      - Events Published: $publishSuccessTotal" -ForegroundColor Gray
+            Write-Host "      - Events Delivered: $deliverySuccessTotal" -ForegroundColor Gray
+
+            # Cross-check with Application Insights if available
+            if (Test-Path variable:totalExec)
+            {
+                if ($totalExec -eq 0)
+                {
+                    Write-Host ""
+                    Write-Host "WARNING: EventGrid shows delivery but no executions in Application Insights" -ForegroundColor Yellow
+                    Write-Host "      Possible issues:" -ForegroundColor Yellow
+                    Write-Host "      1. Application Insights may have ingestion delay (wait 5-10 minutes)" -ForegroundColor Gray
+                    Write-Host "      2. Application Insights connection may not be configured" -ForegroundColor Gray
+                    Write-Host "      3. Function may be receiving events but not logging to Application Insights" -ForegroundColor Gray
+                    Write-Host ""
+                    Write-Host "      Verify APPLICATIONINSIGHTS_CONNECTION_STRING is set in function app settings" -ForegroundColor Cyan
+                }
+                elseif ($deliverySuccessTotal -gt $totalExec)
+                {
+                    Write-Host ""
+                    Write-Host "INFO: EventGrid deliveries ($deliverySuccessTotal) exceed Application Insights executions ($totalExec)" -ForegroundColor Cyan
+                    Write-Host "      This can be normal due to:" -ForegroundColor Gray
+                    Write-Host "      - Application Insights sampling (some executions not logged)" -ForegroundColor Gray
+                    Write-Host "      - Timing differences in metrics collection" -ForegroundColor Gray
+                    Write-Host "      - Consider disabling sampling in host.json if exact counts are needed" -ForegroundColor Gray
+                }
+                else
+                {
+                    Write-Host "      - Function Executions (App Insights): $totalExec" -ForegroundColor Gray
+                    Write-Host "EventGrid and Application Insights metrics are consistent" -ForegroundColor Green
+                }
+            }
         }
         else
         {
-            Write-Host "Configuration appears correct" -ForegroundColor Green
-            Write-Host "   Waiting for group changes to trigger events..." -ForegroundColor Gray
+            Write-Host "                Configuration appears correct" -ForegroundColor Cyan
+            Write-Host "      Waiting for group changes to trigger events..." -ForegroundColor Gray
         }
     }
     Write-Host ""

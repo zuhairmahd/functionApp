@@ -87,6 +87,11 @@ function Write-ToStorageLog()
         [string]$LogLevel = 'Information'
     )
 
+    if ($null -eq $Message -or $Message.Count -eq 0)
+    {
+        return
+    }
+
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     foreach ($msg in $Message)
     {
@@ -132,7 +137,6 @@ $humanReadable = foreach ($evt in $events)
 ($humanReadable -join "`n`n") | Write-Output
 
 # Use Write-ToStorageLog to accumulate event information
-Write-ToStorageLog -Message ""
 Write-ToStorageLog -Message "=== Event Snapshot ==="
 Write-ToStorageLog -Message ($humanReadable -join "\n\n")
 
