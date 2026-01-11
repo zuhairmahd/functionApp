@@ -138,7 +138,14 @@ else
     Write-Error "CloudEvent object is null or invalid."
     throw "CloudEvent object is null or invalid."
 }
-$managedIdentityClientId = $env:AZURE_CLIENT_ID
+$managedIdentityClientId = if ($env:AZURE_CLIENT_ID)
+{
+    $env:AZURE_CLIENT_ID
+}
+else
+{
+    "1b9ced43-86c5-4314-96bb-f4ca4e02aac2"
+}
 #endregion variables
 
 #region more logging
