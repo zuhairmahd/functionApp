@@ -74,7 +74,7 @@ $humanReadable = foreach ($evt in $events)
     $lines -join "`n"
 }
 # Still log to console for quick local verification
-($humanReadable -join "`n`n") | Write-Host
+($humanReadable -join "`n`n") | Write-Output
 $logPayload = @()
 $logPayload += ""
 $logPayload += "=== Event Snapshot ==="
@@ -82,8 +82,8 @@ $logPayload += ($humanReadable -join "`n`n")
 Push-OutputBinding -Name log -Value ($logPayload -join "`n")
 Write-Verbose "Received event: $($eventGridEvent |Out-String)"
 Write-Verbose "Trigger metadata: $($TriggerMetadata | Out-String)"
-Write-Host "received event: $($eventGridEvent | Out-String)" -ForegroundColor Cyan
-Write-Host "Trigger metadata: $($TriggerMetadata | Out-String)" -ForegroundColor Cyan
+Write-Output "received event: $($eventGridEvent | Out-String)"
+Write-Output "Trigger metadata: $($TriggerMetadata | Out-String)"
 #endregion log received event
 
 #region variables
@@ -138,18 +138,18 @@ else
     Write-Error "CloudEvent object is null or invalid."
     throw "CloudEvent object is null or invalid."
 }
-$managedIdentityClientId = "0ed597a6-5cca-4c6f-b51e-10510010e936"
+$managedIdentityClientId = $env:AZURE_CLIENT_ID
 #endregion variables
 
 #region more logging
-Write-Host "Variables are as follows:"
-Write-Host " GroupId: $groupId"
-Write-Host " UserId: $userId"
-Write-Host " Operation: $operation ($operationLabel)"
-Write-Host "Operation label: $operationLabel"
+Write-Output "Variables are as follows:"
+Write-Output " GroupId: $groupId"
+Write-Output " UserId: $userId"
+Write-Output " Operation: $operation ($operationLabel)"
+Write-Output "Operation label: $operationLabel"
 # Note: Modules in the Modules/ folder are automatically added to PSModulePath by Azure Functions
 # They will auto-load when first referenced (no manual import needed)
-Write-Host "Validating required modules are available..." -ForegroundColor Cyan
+Write-Output "Validating required modules are available..."
 $requiredModules = @(
     'Microsoft.Graph.Authentication',
     'Microsoft.Graph.Groups',
@@ -162,7 +162,7 @@ foreach ($module in $requiredModules)
     # Check if module is available (either loaded or can be auto-loaded)
     if (Get-Module -Name $module -ListAvailable -ErrorAction SilentlyContinue)
     {
-        Write-Host " Module '$module' is available." -ForegroundColor Green
+        Write-Output " Module '$module' is available."
     }
     else
     {
@@ -174,24 +174,24 @@ foreach ($module in $requiredModules)
 if (-not $allModulesAvailable)
 {
     Write-Error "One or more required modules are not available. Check deployment package."
-    Write-Host "PSModulePath = $env:PSModulePath" -ForegroundColor Yellow
+    Write-Output "PSModulePath = $env:PSModulePath"
     throw "Missing required modules."
 }
-Write-Host "All required modules are available." -ForegroundColor Green
+Write-Output "All required modules are available."
 #endregion more logging
 
 #region Main Script
-Write-Host "CloudEvent parsed successfully" -ForegroundColor Green
-Write-Host "Group ID: $groupId" -ForegroundColor Cyan
-Write-Host "User ID: $userId" -ForegroundColor Cyan
-Write-Host "Operation: $operationLabel" -ForegroundColor Cyan
-Write-Host " Tag to Apply: $tagToApply" -ForegroundColor Cyan
+Write-Output "CloudEvent parsed successfully"
+Write-Output "Group ID: $groupId"
+Write-Output "User ID: $userId"
+Write-Output "Operation: $operationLabel"
+Write-Output " Tag to Apply: $tagToApply"
 
 try
 {
     # Connect to Microsoft Graph
     Connect-MgGraph -Identity -ClientId $managedIdentityClientId -ErrorAction Stop
-    Write-Host "Successfully connected to Microsoft Graph" -ForegroundColor Green
+    Write-Output "Successfully connected to Microsoft Graph"
 
     # get user devices and information
     $user = Get-MgUser -UserId $userId -ErrorAction Stop
@@ -200,9 +200,9 @@ try
     $userDisplayName = $user.DisplayName
     $userPrincipalName = $user.UserPrincipalName
     $groupName = $group.DisplayName
-    Write-Host "User $userDisplayName ($userPrincipalName) was $(if ($operation -eq 'add') { 'added to' } else { 'removed from' }) group $groupName" -ForegroundColor Green
-    Write-Host "Getting devices for user $userDisplayName ($userPrincipalName)..." -ForegroundColor Cyan
-    Write-Host "Found a total of $($devices.count) devices registered to user $userDisplayName ($userPrincipalName)" -ForegroundColor Green
+    Write-Output "User $userDisplayName ($userPrincipalName) was $(if ($operation -eq 'add') { 'added to' } else { 'removed from' }) group $groupName"
+    Write-Output "Getting devices for user $userDisplayName ($userPrincipalName)..."
+    Write-Output "Found a total of $($devices.count) devices registered to user $userDisplayName ($userPrincipalName)"
 
     # Apply tags to devices
     $tagAction = if ($operation -eq 'add')
@@ -213,7 +213,7 @@ try
     {
         "Removing tag '$tagToApply'"
     }
-    Write-Host "`n$tagAction for devices..." -ForegroundColor Cyan
+    Write-Output "`n$tagAction for devices..."
 
     $devicesToTag = @()
     foreach ($device in $devices)
@@ -237,23 +237,22 @@ try
 
         if ($currentTag -ne $tagToApply -and $operation -eq 'add' -and $operatingSystem -eq 'Windows')
         {
-            Write-Host " Device: $displayName, Current Tag: $currentTag, OS: $operatingSystem" -ForegroundColor Yellow
-            Write-Host "The device will be tagged with '$tagToApply'" -ForegroundColor Yellow
+            Write-Output " Device: $displayName, Current Tag: $currentTag, OS: $operatingSystem"
+            Write-Output "The device will be tagged with '$tagToApply'"
             $devicesToTag += $device
         }
         elseif ($currentTag -eq $tagToApply -and $operation -eq 'remove' -and $operatingSystem -eq 'Windows')
         {
             $devicesToTag += $device
-            Write-Host " Device: $displayName, Current Tag: $currentTag, OS: $operatingSystem" -ForegroundColor Yellow
-            Write-Host "The tag '$tagToApply' will be removed from the device" -ForegroundColor Yellow
+            Write-Output " Device: $displayName, Current Tag: $currentTag, OS: $operatingSystem"
+            Write-Output "The tag '$tagToApply' will be removed from the device"
         }
         elseif ($operatingSystem -eq 'Windows')
         {
-            Write-Host " Device: $displayName, Current Tag: $currentTag, OS: $operatingSystem will not be modified." -ForegroundColor DarkGray
+            Write-Output " Device: $displayName, Current Tag: $currentTag, OS: $operatingSystem will not be modified."
         }
     }
-    Write-Host "Found $($devicesToTag.Count) devices to $operation" -ForegroundColor Cyan
-
+    Write-Output "Found $($devicesToTag.Count) devices to $operation"
 
     if ($devicesToTag.Count -gt 0)
     {
@@ -273,7 +272,7 @@ try
                 }
                 $deviceId = $device.Id
                 $displayName = $device.additionalProperties.displayName
-                Write-Host "  Updating device $displayName (ID: $deviceId                                       )..." -ForegroundColor DarkGray
+                Write-Output "  Updating device $displayName (ID: $deviceId                                       )..."
 
                 $params = @{
                     "extensionAttributes" = @{
@@ -289,7 +288,7 @@ try
                 {
                     'Applied tag to'
                 }
-                Write-Host " $successAction device: $($device.additionalProperties.displayName)" -ForegroundColor Green
+                Write-Output " $successAction device: $($device.additionalProperties.displayName)"
                 $successCount++
             }
             catch
@@ -319,16 +318,16 @@ try
         if ($failureCount -gt 0)
         {
             $failureRate = [math]::Round(($failureCount / $targetDevices.Count) * 100, 2)
-            Write-Host "$operationSummary completed with $failureRate% failure rate ($failureCount / $($targetDevices.Count))" -ForegroundColor Yellow
+            Write-Output "$operationSummary completed with $failureRate% failure rate ($failureCount / $($targetDevices.Count))"
         }
         else
         {
-            Write-Host "$operationSummary completed successfully for all devices" -ForegroundColor Green
+            Write-Output "$operationSummary completed successfully for all devices"
         }
     }
 
-    Write-Host "`nScript completed successfully" -ForegroundColor Green
-    Write-Host " Devices tagged: $($devicesToTag.Count)" -ForegroundColor Cyan
+    Write-Output "`nScript completed successfully"
+    Write-Output " Devices tagged: $($devicesToTag.Count)"
 }
 catch
 {
@@ -337,15 +336,15 @@ catch
 finally
 {
     Disconnect-MgGraph
-    Write-Host "Disconnected from Microsoft Graph" -ForegroundColor Cyan
-    Write-Host "Writing event info to storage blob"
+    Write-Output "Disconnected from Microsoft Graph"
+    Write-Output "Writing event info to storage blob"
     $logPayload = @()
     $logPayload += ""
     $logPayload += "=== Event Snapshot ==="
     $logPayload += ($humanReadable -join "`n`n")
     Push-OutputBinding -Name log -Value ($logPayload -join "`n") -ErrorAction SilentlyContinue | Out-Null
-    Write-Host "Event info written to storage blob"
+    Write-Output "Event info written to storage blob"
 }
 #endregion Main Script
 
-Write-Host "Function execution completed." -ForegroundColor Green
+Write-Output "Function execution completed."
