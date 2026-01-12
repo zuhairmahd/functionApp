@@ -411,8 +411,148 @@ try
 }
 catch
 {
-    Write-Error "`nScript failed: $_"
-    Write-ToStorageLog -Message "Script failed: $_" -LogLevel Error
+    Write-Error "`n=========================================="
+    Write-Error "SCRIPT EXECUTION FAILED"
+    Write-Error "==========================================" Write-ToStorageLog -Message "=========================================="
+    Write-ToStorageLog -Message "SCRIPT EXECUTION FAILED" -LogLevel Error
+    Write-ToStorageLog -Message "==========================================" Write-Error "Error Message: $($_.Exception.Message)"
+    Write-ToStorageLog -Message "Error Message: $($_.Exception.Message)" -LogLevel Error
+    Write-Error "Error Type: $($_.Exception.GetType().FullName)"
+    Write-ToStorageLog -Message "Error Type: $($_.Exception.GetType().FullName)" -LogLevel Error
+    if ($_.InvocationInfo)
+    {
+        Write-Error "`nError Location:"
+        Write-ToStorageLog -Message "Error Location:" -LogLevel Error
+        Write-Error " Script Name: $($_.InvocationInfo.ScriptName)"
+        Write-ToStorageLog -Message " Script Name: $($_.InvocationInfo.ScriptName)" -LogLevel Error
+        Write-Error " Line Number: $($_.InvocationInfo.ScriptLineNumber)"
+        Write-ToStorageLog -Message " Line Number: $($_.InvocationInfo.ScriptLineNumber)" -LogLevel Error
+        Write-Error " Line Content: $($_.InvocationInfo.Line.Trim())"
+        Write-ToStorageLog -Message " Line Content: $($_.InvocationInfo.Line.Trim())" -LogLevel Error
+        Write-Error " Position: Column $($_.InvocationInfo.OffsetInLine)"
+        Write-ToStorageLog -Message " Position: Column $($_.InvocationInfo.OffsetInLine)" -LogLevel Error
+    }
+    Write-Error "`nException Details:"
+    Write-ToStorageLog -Message "Exception Details:" -LogLevel Error
+    Write-Error " Source: $($_.Exception.Source)"
+    Write-ToStorageLog -Message " Source: $($_.Exception.Source)" -LogLevel Error
+    if ($_.Exception.HResult)
+    {
+        Write-Error " HResult: 0x$($_.Exception.HResult.ToString('X8'))"
+        Write-ToStorageLog -Message " HResult: 0x$($_.Exception.HResult.ToString('X8'))" -LogLevel Error
+    }
+
+    if ($_.Exception.InnerException)
+    {
+        Write-Error "`nInner Exception(s):"
+        Write-ToStorageLog -Message "Inner Exception(s):" -LogLevel Error
+        $innerEx = $_.Exception.InnerException
+        $depth = 1
+        while ($innerEx)
+        {
+            Write-Error " [$depth] Type: $($innerEx.GetType().FullName)"
+            Write-ToStorageLog -Message " [$depth] Type: $($innerEx.GetType().FullName)" -LogLevel Error
+            Write-Error " [$depth] Message: $($innerEx.Message)"
+            Write-ToStorageLog -Message " [$depth] Message: $($innerEx.Message)" -LogLevel Error
+            $innerEx = $innerEx.InnerException
+            $depth++
+        }
+    }
+    if ($_.Exception.StackTrace)
+    {
+        Write-Error "`nStack Trace:"
+        Write-ToStorageLog -Message "Stack Trace:" -LogLevel Error
+        Write-Error "$($_.Exception.StackTrace)"
+        Write-ToStorageLog -Message "$($_.Exception.StackTrace)" -LogLevel Error
+    }
+    Write-Error "`nPowerShell Error Record:"
+    Write-ToStorageLog -Message "PowerShell Error Record:" -LogLevel Error
+    Write-Error " Category: $($_.CategoryInfo.Category)"
+    Write-ToStorageLog -Message " Category: $($_.CategoryInfo.Category)" -LogLevel Error
+    Write-Error " Activity: $($_.CategoryInfo.Activity)"
+    Write-ToStorageLog -Message " Activity: $($_.CategoryInfo.Activity)" -LogLevel Error
+    Write-Error " Reason: $($_.CategoryInfo.Reason)"
+    Write-ToStorageLog -Message " Reason: $($_.CategoryInfo.Reason)" -LogLevel Error
+    Write-Error " Target Name: $($_.CategoryInfo.TargetName)"
+    Write-ToStorageLog -Message " Target Name: $($_.CategoryInfo.TargetName)" -LogLevel Error
+    Write-Error " Target Type: $($_.CategoryInfo.TargetType)"
+    Write-ToStorageLog -Message " Target Type: $($_.CategoryInfo.TargetType)" -LogLevel Error
+    if ($_.TargetObject)
+    {
+        Write-Error "`nTarget Object: $($_.TargetObject | ConvertTo-Json -Depth 2 -Compress -ErrorAction SilentlyContinue)"
+        Write-ToStorageLog -Message "Target Object: $($_.TargetObject | ConvertTo-Json -Depth 2 -Compress -ErrorAction SilentlyContinue)" -LogLevel Error
+    }
+    Write-Error "`nScript Context:"
+    Write-ToStorageLog -Message "Script Context:" -LogLevel Error
+    Write-Error " User ID: $userId"
+    Write-ToStorageLog -Message " User ID: $userId" -LogLevel Error
+    Write-Error " Group ID: $groupId"
+    Write-ToStorageLog -Message " Group ID: $groupId" -LogLevel Error
+    Write-Error " Operation: $operation"
+    Write-ToStorageLog -Message " Operation: $operation" -LogLevel Error
+    Write-Error " Tag: $tagToApply"
+    Write-ToStorageLog -Message " Tag: $tagToApply" -LogLevel Error
+    Write-Error " Managed Identity Client ID: $managedIdentityClientId"
+    Write-ToStorageLog -Message " Managed Identity Client ID: $managedIdentityClientId" -LogLevel Error
+    try
+    {
+        $mgContext = Get-MgContext -ErrorAction SilentlyContinue
+        if ($mgContext)
+        {
+            Write-Error "`nMicrosoft Graph Context:"
+            Write-ToStorageLog -Message "Microsoft Graph Context:" -LogLevel Error
+            Write-Error " Client ID: $($mgContext.ClientId)"
+            Write-ToStorageLog -Message " Client ID: $($mgContext.ClientId)" -LogLevel Error
+            Write-Error " Tenant ID: $($mgContext.TenantId)"
+            Write-ToStorageLog -Message " Tenant ID: $($mgContext.TenantId)" -LogLevel Error
+            Write-Error " Scopes: $($mgContext.Scopes -join ', ')"
+            Write-ToStorageLog -Message " Scopes: $($mgContext.Scopes -join ', ')" -LogLevel Error
+            Write-Error " Authentication Type: $($mgContext.AuthType)"
+            Write-ToStorageLog -Message " Authentication Type: $($mgContext.AuthType)" -LogLevel Error
+        }
+        else
+        {
+            Write-Error "`nMicrosoft Graph Context: Not connected or unavailable"
+            Write-ToStorageLog -Message "Microsoft Graph Context: Not connected or unavailable" -LogLevel Error
+        }
+    }
+    catch
+    {
+        Write-Error "`nUnable to retrieve Microsoft Graph context"
+        Write-ToStorageLog -Message "Unable to retrieve Microsoft Graph context" -LogLevel Error
+    }
+    Write-Error "`nEnvironment Information:"
+    Write-ToStorageLog -Message "Environment Information:" -LogLevel Error
+    Write-Error " PowerShell Version: $($PSVersionTable.PSVersion)"
+    Write-ToStorageLog -Message " PowerShell Version: $($PSVersionTable.PSVersion)" -LogLevel Error
+    Write-Error " OS: $($PSVersionTable.OS)"
+    Write-ToStorageLog -Message " OS: $($PSVersionTable.OS)" -LogLevel Error
+    Write-Error " Platform: $($PSVersionTable.Platform)"
+    Write-ToStorageLog -Message " Platform: $($PSVersionTable.Platform)" -LogLevel Error
+    Write-Error " Execution Time: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff')"
+    Write-ToStorageLog -Message " Execution Time: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff')" -LogLevel Error
+    Write-Error "`nLoaded Microsoft Graph Module Versions:"
+    Write-ToStorageLog -Message "Loaded Microsoft Graph Module Versions:" -LogLevel Error
+    foreach ($module in $requiredModules)
+    {
+        $loadedModule = Get-Module -Name $module -ErrorAction SilentlyContinue
+        if ($loadedModule)
+        {
+            Write-Error " $module : $($loadedModule.Version)"
+            Write-ToStorageLog -Message " $module : $($loadedModule.Version)" -LogLevel Error
+        }
+        else
+        {
+            Write-Error " $module : Not loaded"
+            Write-ToStorageLog -Message " $module : Not loaded" -LogLevel Error
+        }
+    }
+    Write-Error "`n=========================================="
+    Write-Error "END OF ERROR DIAGNOSTIC INFORMATION"
+    Write-Error "=========================================="
+    Write-ToStorageLog -Message "=========================================="
+    Write-ToStorageLog -Message "END OF ERROR DIAGNOSTIC INFORMATION" -LogLevel Error
+    Write-ToStorageLog -Message "=========================================="
 }
 finally
 {
