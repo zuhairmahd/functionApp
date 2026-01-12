@@ -411,46 +411,50 @@ try
 }
 catch
 {
-    Write-Error "`n=========================================="
-    Write-Error "SCRIPT EXECUTION FAILED"
-    Write-Error "==========================================" Write-ToStorageLog -Message "=========================================="
-    Write-ToStorageLog -Message "SCRIPT EXECUTION FAILED" -LogLevel Error
-    Write-ToStorageLog -Message "==========================================" Write-Error "Error Message: $($_.Exception.Message)"
-    Write-ToStorageLog -Message "Error Message: $($_.Exception.Message)" -LogLevel Error
-    Write-Error "Error Type: $($_.Exception.GetType().FullName)"
-    Write-ToStorageLog -Message "Error Type: $($_.Exception.GetType().FullName)" -LogLevel Error
+    function Write-DiagnosticMessage
+    {
+        param(
+            [Parameter(Mandatory = $true)]
+            [string]$Message
+        )
+
+        Write-Error $Message
+        Write-ToStorageLog -Message $Message -LogLevel Error
+    }
+
+    Write-DiagnosticMessage "`n=========================================="
+    Write-DiagnosticMessage "SCRIPT EXECUTION FAILED"
+    Write-DiagnosticMessage "=========================================="
+
+    Write-DiagnosticMessage "Error Message: $($_.Exception.Message)"
+    Write-DiagnosticMessage "Error Type: $($_.Exception.GetType().FullName)"
+
     if ($_.InvocationInfo)
     {
-        Write-Error "`nError Location:"
-        Write-ToStorageLog -Message "Error Location:" -LogLevel Error
-        Write-Error " Script Name: $($_.InvocationInfo.ScriptName)"
-        Write-ToStorageLog -Message " Script Name: $($_.InvocationInfo.ScriptName)" -LogLevel Error
-        Write-Error " Line Number: $($_.InvocationInfo.ScriptLineNumber)"
-        Write-ToStorageLog -Message " Line Number: $($_.InvocationInfo.ScriptLineNumber)" -LogLevel Error
-        Write-Error " Line Content: $($_.InvocationInfo.Line.Trim())"
-        Write-ToStorageLog -Message " Line Content: $($_.InvocationInfo.Line.Trim())" -LogLevel Error
-        Write-Error " Position: Column $($_.InvocationInfo.OffsetInLine)"
-        Write-ToStorageLog -Message " Position: Column $($_.InvocationInfo.OffsetInLine)" -LogLevel Error
+        Write-DiagnosticMessage "`nError Location:"
+        Write-DiagnosticMessage " Script Name: $($_.InvocationInfo.ScriptName)"
+        Write-DiagnosticMessage " Line Number: $($_.InvocationInfo.ScriptLineNumber)"
+        Write-DiagnosticMessage " Line Content: $($_.InvocationInfo.Line.Trim())"
+        Write-DiagnosticMessage " Position: Column $($_.InvocationInfo.OffsetInLine)"
     }
-    Write-Error "`nException Details:"
-    Write-ToStorageLog -Message "Exception Details:" -LogLevel Error
-    Write-Error " Source: $($_.Exception.Source)"
-    Write-ToStorageLog -Message " Source: $($_.Exception.Source)" -LogLevel Error
+
+    Write-DiagnosticMessage "`nException Details:"
+    Write-DiagnosticMessage " Source: $($_.Exception.Source)"
+
     if ($_.Exception.HResult)
     {
-        Write-Error " HResult: 0x$($_.Exception.HResult.ToString('X8'))"
-        Write-ToStorageLog -Message " HResult: 0x$($_.Exception.HResult.ToString('X8'))" -LogLevel Error
+        Write-DiagnosticMessage " HResult: 0x$($_.Exception.HResult.ToString('X8'))"
     }
 
     if ($_.Exception.InnerException)
     {
-        Write-Error "`nInner Exception(s):"
-        Write-ToStorageLog -Message "Inner Exception(s):" -LogLevel Error
+        Write-DiagnosticMessage "`nInner Exception(s):"
         $innerEx = $_.Exception.InnerException
         $depth = 1
         while ($innerEx)
         {
-            Write-Error " [$depth] Type: $($innerEx.GetType().FullName)"
+            Write-DiagnosticMessage " [$depth] Type: $($innerEx.GetType().FullName)"
+            Write-DiagnosticMessage " [$depth] Message: $($innerEx.Message)"
             Write-ToStorageLog -Message " [$depth] Type: $($innerEx.GetType().FullName)" -LogLevel Error
             Write-Error " [$depth] Message: $($innerEx.Message)"
             Write-ToStorageLog -Message " [$depth] Message: $($innerEx.Message)" -LogLevel Error
@@ -529,7 +533,14 @@ catch
     Write-ToStorageLog -Message " OS: $($PSVersionTable.OS)" -LogLevel Error
     Write-Error " Platform: $($PSVersionTable.Platform)"
     Write-ToStorageLog -Message " Platform: $($PSVersionTable.Platform)" -LogLevel Error
-    Write-Error " Execution Time: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff')"
+    Write-ToStorageLog -Message "Loaded Microsoft Graph Module Versions:" -LogLevel Error
+    $requiredModules = @(
+        'Microsoft.Graph.Authentication'
+        'Microsoft.Graph.Groups'
+        'Microsoft.Graph.Users'
+        'Microsoft.Graph.Identity.DirectoryManagement'
+        'Microsoft.Graph.ChangeNotifications'
+    )
     Write-ToStorageLog -Message " Execution Time: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff')" -LogLevel Error
     Write-Error "`nLoaded Microsoft Graph Module Versions:"
     Write-ToStorageLog -Message "Loaded Microsoft Graph Module Versions:" -LogLevel Error
