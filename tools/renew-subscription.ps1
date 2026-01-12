@@ -20,10 +20,11 @@
 [CmdletBinding()]
 param(
     [Parameter()]
-    [string]$SubscriptionId
+    [string]$SubscriptionId,
+    [int]$renewalThreshhold = 24,
+    [int]$renewalLengthInMinutes = 41760 #a little under 29 days
 )
 
-$renewalThreshhold = 24
 Import-Module Microsoft.Graph.ChangeNotifications
 
 # Check if already connected to Microsoft Graph
@@ -103,25 +104,19 @@ Write-Host "  Hours until expiration: $([Math]::Round($hoursUntilExpiration, 2))
 if ($hoursUntilExpiration -lt $renewalThreshhold)
 {
     Write-Host "Renewing subscription: $SubscriptionId" -ForegroundColor Cyan
-    # Set new expiration to maximum allowed (4230 minutes = ~3 days)
-    $expirationMinutes = 4230
-    $newExpirationDate = (Get-Date).AddMinutes($expirationMinutes)
-    Write-Host "  New expiration: $newExpirationDate ($expirationMinutes minutes)" -ForegroundColor Gray
+    $newExpirationDate = (Get-Date).AddMinutes($renewalLengthInMinutes)
+    Write-Host "  New expiration: $newExpirationDate ($renewalLengthInMinutes minutes)" -ForegroundColor Gray
     try
     {
-
         # Update the subscription with new expiration
         $updateParams = @{
             ExpirationDateTime = $newExpirationDate
         }
-
         Write-Host "`nUpdating subscription..." -ForegroundColor Cyan
         $updatedSubscription = Update-MgSubscription -SubscriptionId $SubscriptionId -BodyParameter $updateParams
-
         Write-Host "`nSubscription renewed successfully!" -ForegroundColor Green
         Write-Host "  Subscription ID: $($updatedSubscription.Id)" -ForegroundColor Yellow
         Write-Host "  New expiration: $($updatedSubscription.ExpirationDateTime)" -ForegroundColor Yellow
-
         # Update saved subscription info
         if (Test-Path "subscription-info.json")
         {
