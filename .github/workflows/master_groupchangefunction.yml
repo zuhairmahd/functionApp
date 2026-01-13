@@ -7,7 +7,6 @@ on:
   push:
     branches:
       - master
-      - deployment
   workflow_dispatch:
 
 permissions:
@@ -121,9 +120,9 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_5DD823BE3DB14BD8AE2467F20D924DD1 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_484B72A5EA094132AF8DD8B9A13E2AEE }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_0F58BAE08C0442AD8517CAA4EEDBBD2A }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_7C1C0B422F8A4952A1C558F9F8DB9F67}}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_24909C316BFC4F6382A70AF94273EB70}}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_3B2FAD41D3104C15A941ABEA54388A2C}}
 
       - name: "Run Azure Functions Action"
         uses: Azure/functions-action@v1
